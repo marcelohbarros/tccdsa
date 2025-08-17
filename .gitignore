@@ -1,0 +1,6 @@
+log/*
+*.log
+datasets/*
+*.pyc
+__pycache__/
+.vscode/
