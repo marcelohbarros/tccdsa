@@ -11,40 +11,37 @@ import csv
 def parse_args():
     parser = argparse.ArgumentParser(description="Read a CSV file and print its contents.")
     parser.add_argument('--data_path', type=str, default='tccdsa/datasets/baseline.csv', help='Path to the CSV file to open (default: datasets/tomcat.csv)')
-    parser.add_argument('--metrics', type=str, nargs='+', default=['defect', 'SHA', 'loc', 'avg_cc', 'cbo', 'rfc', 'wmc'], help='List of column names to read from the CSV file (default: all columns)')
+    parser.add_argument('--metrics', type=str, nargs='+', default=['bug', 'name', 'loc', 'avg_cc', 'cbo', 'rfc', 'wmc'], help='List of column names to read from the CSV file (default: all columns)')
     parser.add_argument('--train_len', type=float, default=0.7, help='Proportion of data to use for training (default: 0.7)')
     
     args = parser.parse_args()
-    metrics = m.ArgumentMetricSet(args.metrics)
+    metrics = m.ArgumentMetrics(args.metrics, validate=True)
 
     return args.data_path, metrics, args.train_len
 
 
 def load_data(data_path, metrics):
     print(f"Reading data from: {data_path}")
-    csv_file_metrics = m.CsvMetricSet(data_path)
-    if metrics.is_empty():
-        metrics = csv_file_metrics
+    csv_file_metrics = m.FileMetrics(data_path)
+    tags = csv_file_metrics.get_tags(argument_metrics=metrics, validate=False)
 
-    df = pandas.read_csv(data_path, usecols=metrics.tags)
-    missing_cols = [col for col in metrics.tags if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"The following required columns are missing from the CSV file: {', '.join(missing_cols)}")
-    
-    df['defect'] = df['defect'].astype(bool)
+    bug_tag = csv_file_metrics.get_bug_tag()
 
-    return df, metrics
+    df = pandas.read_csv(data_path, usecols=tags)    
+    df[bug_tag] = df[bug_tag].astype(bool)
+
+    return df, csv_file_metrics, tags
 
 
-def print_data_stats(df, metrics):
+def print_data_stats(df, tags, bug_tag):
     data_size = len(df)
-    bug_module_count = len(df[df['defect'] == True])
-    print(f"metrics: {metrics.tags}")
+    bug_module_count = len(df[df[bug_tag] == True])
+    print(f"metrics: {tags}")
     print(f"data count: {data_size}")
     print(f"modules with bugs: {bug_module_count} ({(bug_module_count / data_size) * 100:.2f}%)")
 
 
-def split_data(df, train_len):
+def split_data(df, train_len, bug_tag):
     rng = np.random.default_rng()
     random_seed = rng.integers(0, 2**32 - 1)
     train_df = df.sample(frac=train_len, random_state=random_seed)
@@ -52,13 +49,13 @@ def split_data(df, train_len):
 
     # Keep duplicating bug=True points until true/false ratio is > 0.25
     balance_ratio = 0.5
-    bug_true = train_df[train_df['defect'] == True]
+    bug_true = train_df[train_df[bug_tag] == True]
     n_total = len(train_df)
     n_true = len(bug_true)
     ratio = n_true / n_total
     if n_true > 0 and ratio <= balance_ratio:
         while True:
-            n_true = len(train_df[train_df['defect'] == True])
+            n_true = len(train_df[train_df[bug_tag] == True])
             n_total = len(train_df)
             ratio = n_true / n_total
             if ratio > balance_ratio:
@@ -75,18 +72,18 @@ def split_data(df, train_len):
     return train_df, validation_df, random_seed
 
 
-def train_model(train_df, random_seed):
-    feature_columns = [col for col in train_df.columns if col not in ['SHA', 'defect']]
+def train_model(train_df, random_seed, name_tag, bug_tag):
+    feature_columns = [col for col in train_df.columns if col not in [name_tag, bug_tag]]
     X_train = train_df[feature_columns]
-    y_train = train_df['defect']
+    y_train = train_df[bug_tag]
     clf = RandomForestClassifier(random_state=random_seed)
     clf.fit(X_train, y_train)
     return clf, feature_columns
 
 
-def evaluate_model(clf, feature_columns, validation_df):
+def evaluate_model(clf, feature_columns, validation_df, bug_tag):
     X_val = validation_df[feature_columns]
-    y_val = validation_df['defect']
+    y_val = validation_df[bug_tag]
     y_pred = clf.predict(X_val)
     acc = accuracy_score(y_val, y_pred)
     prec = precision_score(y_val, y_pred, zero_division=0, average=None)
@@ -104,12 +101,14 @@ def evaluate_model(clf, feature_columns, validation_df):
 
 
 def main():
-    data_path, metrics, train_len = parse_args()
-    df, metrics = load_data(data_path, metrics)
-    print_data_stats(df, metrics)
-    train_df, validation_df, random_seed = split_data(df, train_len)
-    clf, feature_columns = train_model(train_df, random_seed)
-    evaluate_model(clf, feature_columns, validation_df)
+    data_path, argument_metrics, train_len = parse_args()
+    df, csv_file_metrics, tags = load_data(data_path, argument_metrics)
+    name_tag = csv_file_metrics.get_name_tag()
+    bug_tag = csv_file_metrics.get_bug_tag()
+    print_data_stats(df, tags, bug_tag)
+    train_df, validation_df, random_seed = split_data(df, train_len, bug_tag)
+    clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag)
+    evaluate_model(clf, feature_columns, validation_df, bug_tag)
 
 
 if __name__ == "__main__":

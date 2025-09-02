@@ -30,13 +30,24 @@ class Metric:
         for m in cls.all_metrics:
             if tag in m.tags:
                 return m
-        
+
     def __init__(self, description, tags):
-        self.tags = {tag.lower() for tag in tags}
-        self.description = description
+        self._tags = {tag.lower() for tag in tags}
+        self._description = description
+
+    @property
+    def tags(self):
+        return self._tags
+    
+    @property
+    def description(self):
+        return self._description
 
     def __repr__(self):
-        return f"Metric({self.name}, [\"{'", "'.join(self.tags)}\"])"
+        return f"Metric(\"{self._description}\", [\"{'", "'.join(self._tags)}\"])"
+
+    def __hash__(self):
+        return hash((", ".join(self._tags),))
 
 # Obligatory columns
 NAME = Metric("Name", ["name", "SHA"])
@@ -81,7 +92,29 @@ VERSION = Metric("Project version", ["version"])
 WMC = Metric("Weighted Methods per Class", ["wmc"])
 
 
-class MetricInstance:
+class ArgumentMetrics:
+    def __init__(self, tags, validate=False):
+        self._required_columns = {NAME, BUG}
+        self._metrics = self._required_columns.copy()
+        self._metrics.update({Metric.get_metric(tag) for tag in tags})
+        if None in self._metrics:
+            self._metrics.remove(None)
+            if validate:
+                raise ValueError(f"A metric was not found from the tags: '{tags}'")
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    def is_empty(self):
+        return len(self._metrics) == len(self._required_columns)
+
+    @property
+    def required_columns(self):
+        return self._required_columns
+
+
+class MetricTag:
     def __init__(self, tag):
         self._metric = Metric.get_metric(tag)
         self._tag = tag
@@ -92,50 +125,71 @@ class MetricInstance:
     @property
     def metric(self):
         return self._metric
-    
+
     @property
     def tag(self):
         return self._tag
-    
+
     def __hash__(self):
         return hash((self.tag,))
 
 
-class MetricSet:
-    def __init__(self, tags):
-        self._metrics = {MetricInstance(tag) for tag in tags} if tags else set()
-  
-    @property
-    def metrics(self):
-        return self._metrics
-    
-    @property
-    def tags(self):
-        return {m.tag for m in self._metrics}
-
-
-class ArgumentMetricSet(MetricSet):
-    def __init__(self, tags):
-        super().__init__(tags)
-        if None in self._metrics:
-            raise ValueError(f"A metric was not found from the tags: '{tags}'")
-        self._required_columns = {NAME, BUG}
-        self._metrics.update(self._metrics)
-  
-    def is_empty(self):
-        return bool(self._metrics)
-
-    @property
-    def required_columns(self):
-        return self._required_columns
-
-
-class CsvMetricSet(MetricSet):
+class FileMetrics:
     def __init__(self, data_path):
-        with open(data_path) as csvfile:
-            reader = csv.reader(csvfile)
-            csv_file_columns = next(reader)
-        super().__init__(csv_file_columns)
+        with open(data_path) as file:
+            reader = csv.reader(file)
+            file_column_tags = next(reader)
 
-        remove = {metric for metric in self.metrics if not metric.is_valid()}
+        self._metrics = {MetricTag(tag) for tag in file_column_tags}
+        remove = {metric for metric in self._metrics if not metric.is_valid()}
         self._metrics.difference_update(remove)
+
+        if self.get_name_tag() is None:
+            raise ValueError("A name column is required in the CSV file.")
+        if self.get_bug_tag() is None:
+            raise ValueError("A bug column is required in the CSV file.")
+
+    def get_metric(self, tag):
+        for metric in self._metrics:
+            if metric.tag == tag:
+                return metric.metric
+
+    def get_metrics(self, *, tags=None, validate=False):
+        if tags is None:
+            return self.get_all_metrics()
+
+        metrics = [self.get_metric(tag) for tag in tags]
+        if validate and None in metrics:
+            raise ValueError(f"A metric was not found from the tags: '{tags}'")
+
+        return metrics
+
+    def get_all_metrics(self):
+        return [metric.metric for metric in self._metrics]
+
+    def get_tag(self, metric, validate=False):
+        for m in self._metrics:
+            if m.metric == metric:
+                return m.tag
+            
+        if validate:
+            raise ValueError(f"A tag was not found from the metric: '{metric}' in the file columns: '{self.get_all_tags()}'")
+
+    def get_tags(self, *, metrics=None, argument_metrics=None, validate=False):
+        if not argument_metrics.is_empty() and argument_metrics is not None:
+            metrics = argument_metrics.metrics
+
+        if metrics is None:
+            return self.get_all_tags()
+
+        tags = [self.get_tag(metric, validate) for metric in metrics if self.get_tag(metric) is not None]
+        return tags
+
+    def get_all_tags(self):
+        return [metric.tag for metric in self._metrics]
+
+    def get_name_tag(self):
+        return self.get_tag(NAME)
+    
+    def get_bug_tag(self):
+        return self.get_tag(BUG)
