@@ -7,29 +7,45 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 import metrics as m
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import os
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Read a CSV file and print its contents.")
-    parser.add_argument('--data_path', type=str, default='tccdsa/datasets/tomcat.csv', help='Path to the CSV file to open (default: datasets/tomcat.csv)')
+    parser.add_argument('--data_path', type=str, default='tccdsa/datasets/baseline.csv', help='Path to the CSV file to open (default: datasets/tomcat.csv)')
     parser.add_argument('--metrics', type=str, nargs='+', default=[], help='List of column names to read from the CSV file (default: all columns)')
     parser.add_argument('--train_len', type=float, default=0.7, help='Proportion of data to use for training (default: 0.7)')
     parser.add_argument('--balance_ratio', type=float, default=0.5, help='If set, upsample bug=True rows until the ratio is equal to the balance_ratio (default: 0.5)')
     parser.add_argument('--use_boolean_model', action='store_true', help='If set, use a model that predicts bugs based on booleans instead of ints (default: False)')
+    parser.add_argument('--extract_features', type=int, default=None, help='If set, extract features using PCA (default: None). The value indicates the number of components to keep.')
 
     args = parser.parse_args()
     metrics = m.ArgumentMetrics(args.metrics, validate=True)
 
-    return args.data_path, metrics, args.train_len, args.balance_ratio, args.use_boolean_model
+    return args.data_path, metrics, args.train_len, args.balance_ratio, args.use_boolean_model, args.extract_features
 
 
 def load_data(data_path, metrics):
-    print(f"Reading data from: {data_path}")
-    csv_file_metrics = m.FileMetrics(data_path)
-    tags = csv_file_metrics.get_tags(argument_metrics=metrics, validate=False)
+    def get_db_from_file(data_path, metrics):
+        print(f"Reading data from: {data_path}")
+        csv_file_metrics = m.FileMetrics(data_path)
+        tags = csv_file_metrics.get_tags(argument_metrics=metrics, validate=False)
 
-    df = pandas.read_csv(data_path, usecols=tags)    
+        df = pandas.read_csv(data_path, usecols=tags)    
+        return df, csv_file_metrics, tags
 
-    return df, csv_file_metrics, tags
+    data = {}
+    if os.path.isdir(data_path):
+        print(f"{data_path} is a directory. Reading all CSV files inside...")
+        all_files = [os.path.join(data_path, f) for f in os.listdir(data_path) if f.endswith('.csv')]
+        for file in all_files:
+            df, csv_file_metrics, tags = get_db_from_file(file, metrics)
+            data[file] = (df, csv_file_metrics, tags)
+    else:
+        df, csv_file_metrics, tags = get_db_from_file(data_path, metrics)
+        data[data_path] = (df, csv_file_metrics, tags)
+    print(f"found {len(data)} dataset(s).")
+    return data
 
 
 def print_data_stats(df, tags, bug_tag):
@@ -117,23 +133,41 @@ def normalize_data(df, name_tag, bug_tag):
     return df
 
 
+def extract_features(df, name_tag, bug_tag, features_number):
+    print("Extracting features...")
+
+    feature_columns = [col for col in df.columns if col not in [name_tag, bug_tag]]
+    x_features = df[feature_columns]
+    pca = PCA(n_components=min(len(feature_columns), features_number))
+    principal_components = pca.fit_transform(x_features)
+    pc_columns = [f'PC{i+1}' for i in range(principal_components.shape[1])]
+    df_pc = pandas.DataFrame(data=principal_components, columns=pc_columns)
+    df = pandas.concat([df[[name_tag, bug_tag]].reset_index(drop=True), df_pc.reset_index(drop=True)], axis=1)
+
+    return df
+
+
 def generate_random_seed():
     rng = np.random.default_rng()
     return rng.integers(0, 2**32 - 1)
 
 
 def main():
-    data_path, argument_metrics, train_len, balance_ratio, use_boolean_model = parse_args()
+    data_path, argument_metrics, train_len, balance_ratio, use_boolean_model, features_number = parse_args()
     random_seed = generate_random_seed()
-    df, csv_file_metrics, tags = load_data(data_path, argument_metrics)
-    name_tag = csv_file_metrics.get_name_tag()
-    bug_tag = csv_file_metrics.get_bug_tag()
-    print_data_stats(df, tags, bug_tag)
-    df = normalize_data(df, name_tag, bug_tag)
-    train_df, validation_df, random_seed = split_data(df, train_len)
-    train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
-    clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
-    evaluate_model(clf, feature_columns, validation_df, bug_tag)
+    data = load_data(data_path, argument_metrics)
+    for data_path, (df, csv_file_metrics, tags) in data.items():
+        print(f"\nProcessing dataset: {data_path}")
+        name_tag = csv_file_metrics.get_name_tag()
+        bug_tag = csv_file_metrics.get_bug_tag()
+        print_data_stats(df, tags, bug_tag)
+        df = normalize_data(df, name_tag, bug_tag)
+        if features_number:
+            df = extract_features(df, name_tag, bug_tag, features_number)
+        train_df, validation_df, random_seed = split_data(df, train_len)
+        train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
+        clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
+        evaluate_model(clf, feature_columns, validation_df, bug_tag)
 
 
 if __name__ == "__main__":
