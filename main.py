@@ -1,14 +1,15 @@
 import argparse
-import pandas
-import numpy as np
+import os
 
+import numpy as np
+import pandas
+from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.preprocessing import StandardScaler
 
 import metrics as m
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-import os
+import csvwriter as cw
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Read a CSV file and print its contents.")
@@ -26,24 +27,27 @@ def parse_args():
 
 
 def load_data(data_path, metrics):
-    def get_db_from_file(data_path, metrics):
-        print(f"Reading data from: {data_path}")
-        csv_file_metrics = m.FileMetrics(data_path)
+    def get_db_from_file(full_path):
+        print(f"Reading data from: {full_path}")
+        csv_file_metrics = m.FileMetrics(full_path)
         tags = csv_file_metrics.get_tags(argument_metrics=metrics, validate=False)
 
-        df = pandas.read_csv(data_path, usecols=tags)    
+        df = pandas.read_csv(full_path, usecols=tags)    
         return df, csv_file_metrics, tags
 
     data = {}
     if os.path.isdir(data_path):
         print(f"{data_path} is a directory. Reading all CSV files inside...")
-        all_files = [os.path.join(data_path, f) for f in os.listdir(data_path) if f.endswith('.csv')]
-        for file in all_files:
-            df, csv_file_metrics, tags = get_db_from_file(file, metrics)
+        dir = data_path
+        files = [f for f in os.listdir(dir) if f.endswith('.csv')]
+        for file in files:
+            full_path = os.path.join(dir, file)
+            df, csv_file_metrics, tags = get_db_from_file(full_path)
             data[file] = (df, csv_file_metrics, tags)
     else:
-        df, csv_file_metrics, tags = get_db_from_file(data_path, metrics)
-        data[data_path] = (df, csv_file_metrics, tags)
+        file = os.path.basename(data_path)
+        df, csv_file_metrics, tags = get_db_from_file(data_path)
+        data[file] = (df, csv_file_metrics, tags)
     print(f"Found {len(data)} dataset(s).")
     return data
 
@@ -105,8 +109,10 @@ def train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model):
     return clf, feature_columns
 
 
-def evaluate_model(clf, feature_columns, validation_df, bug_tag):
+def evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset, writer):
     print("Evaluating model...")
+    print("-----")
+    print(f"Results for dataset '{dataset}':")
     X_val = validation_df[feature_columns]
     y_val = validation_df[bug_tag].astype(bool)
     y_pred = clf.predict(X_val).astype(bool)
@@ -123,6 +129,7 @@ def evaluate_model(clf, feature_columns, validation_df, bug_tag):
     print(cm)
     print("Classification report:")
     print(classification_report(y_val, y_pred, zero_division=0))
+    save_results_to_csv(writer, dataset, acc, prec, rec, f1, cm)
 
 
 def normalize_data(df, name_tag, bug_tag):
@@ -152,13 +159,20 @@ def generate_random_seed():
     return rng.integers(0, 2**32 - 1)
 
 
+def save_results_to_csv(writer, *row_data):
+    print("Saving results to CSV...")
+    row = cw.CsvRowData(*row_data)
+    writer.write(row.to_dict())
+
+
 def main():
     data_path, argument_metrics, train_len, balance_ratio, use_boolean_model, features_number = parse_args()
     random_seed = generate_random_seed()
     data = load_data(data_path, argument_metrics)
-    for data_path, (df, csv_file_metrics, tags) in data.items():
+    writer = cw.CsvWriter('log/results.csv')
+    for dataset, (df, csv_file_metrics, tags) in data.items():
         print("------------------------------------")
-        print(f"Processing dataset: {data_path}")
+        print(f"Processing dataset: {dataset}")
         name_tag = csv_file_metrics.get_name_tag()
         bug_tag = csv_file_metrics.get_bug_tag()
         print_data_stats(df, tags, bug_tag)
@@ -168,7 +182,7 @@ def main():
         train_df, validation_df, random_seed = split_data(df, train_len)
         train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
         clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
-        evaluate_model(clf, feature_columns, validation_df, bug_tag)
+        evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset, writer)
 
 
 if __name__ == "__main__":
