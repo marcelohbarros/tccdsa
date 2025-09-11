@@ -5,7 +5,7 @@ import numpy as np
 import pandas
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 import metrics as m
@@ -19,11 +19,12 @@ def parse_args():
     parser.add_argument('--balance_ratio', type=float, default=0.5, help='If set, upsample bug=True rows until the ratio is equal to the balance_ratio (default: 0.5)')
     parser.add_argument('--use_boolean_model', action='store_true', help='If set, use a model that predicts bugs based on booleans instead of ints (default: False)')
     parser.add_argument('--extract_features', type=int, default=None, help='If set, extract features using PCA (default: None). The value indicates the number of components to keep.')
+    parser.add_argument('--repetitions', type=int, default=10, help='Number of times to repeat each experiment (default: 10)')
 
     args = parser.parse_args()
     metrics = m.ArgumentMetrics(args.metrics, validate=True)
 
-    return args.data_path, metrics, args.train_len, args.balance_ratio, args.use_boolean_model, args.extract_features
+    return args.data_path, metrics, args.train_len, args.balance_ratio, args.use_boolean_model, args.extract_features, args.repetitions
 
 
 def load_data(data_path, metrics):
@@ -109,7 +110,7 @@ def train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model):
     return clf, feature_columns
 
 
-def evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset, writer):
+def evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer):
     print("Evaluating model...")
     print("-----")
     print(f"Results for dataset '{dataset}':")
@@ -129,7 +130,19 @@ def evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset, writer
     print(cm)
     print("Classification report:")
     print(classification_report(y_val, y_pred, zero_division=0))
-    save_results_to_csv(writer, dataset, acc, prec, rec, f1, cm)
+
+    # Calculate AUC if possible
+    try:
+        if hasattr(clf, "predict_proba"):
+            y_proba = clf.predict_proba(validation_df[feature_columns])[:, 1]
+            auc = roc_auc_score(validation_df[bug_tag].astype(bool), y_proba)
+            print(f"Validation AUC: {auc:.4f}")
+        else:
+            print("AUC cannot be calculated: classifier does not support predict_proba.")
+    except Exception as e:
+        print(f"Error calculating AUC: {e}")
+
+    save_results_to_csv(writer, test_name, run_number, dataset, acc, prec, rec, f1, cm, auc)
 
 
 def normalize_data(df, name_tag, bug_tag):
@@ -166,23 +179,25 @@ def save_results_to_csv(writer, *row_data):
 
 
 def main():
-    data_path, argument_metrics, train_len, balance_ratio, use_boolean_model, features_number = parse_args()
+    data_path, argument_metrics, train_len, balance_ratio, use_boolean_model, features_number, repetitions = parse_args()
     random_seed = generate_random_seed()
     data = load_data(data_path, argument_metrics)
     writer = cw.CsvWriter('log/results.csv')
     for dataset, (df, csv_file_metrics, tags) in data.items():
-        print("------------------------------------")
-        print(f"Processing dataset: {dataset}")
-        name_tag = csv_file_metrics.get_name_tag()
-        bug_tag = csv_file_metrics.get_bug_tag()
-        print_data_stats(df, tags, bug_tag)
-        df = normalize_data(df, name_tag, bug_tag)
-        if features_number:
-            df = extract_features(df, name_tag, bug_tag, features_number)
-        train_df, validation_df, random_seed = split_data(df, train_len)
-        train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
-        clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
-        evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset, writer)
+        for run_number in range(0, repetitions):
+            test_name = dataset
+            print("------------------------------------")
+            print(f"Processing dataset: {dataset}")
+            name_tag = csv_file_metrics.get_name_tag()
+            bug_tag = csv_file_metrics.get_bug_tag()
+            print_data_stats(df, tags, bug_tag)
+            df = normalize_data(df, name_tag, bug_tag)
+            if features_number:
+                df = extract_features(df, name_tag, bug_tag, features_number)
+            train_df, validation_df, random_seed = split_data(df, train_len)
+            train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
+            clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
+            evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
 
 
 if __name__ == "__main__":

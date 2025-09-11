@@ -30,15 +30,20 @@ class CsvWriter:
 
 class CsvRowData:
     _input_format = [
+        'test_name',
+        'run_number',
         'dataset',
         'accuracy',
         'precision',
         'recall',
         'f1',
-        'confusion_matrix'
+        'confusion_matrix',
+        'auc'
     ]
 
     _conversion = {
+        'test_name': lambda x: x['test_name'],
+        'run_number': lambda x: int(x['run_number']),
         'dataset': lambda x: x['dataset'],
         'accuracy': lambda x: x['accuracy'],
         'precision_true': lambda x: float(x['precision'][1]),
@@ -51,6 +56,7 @@ class CsvRowData:
         'true_negative': lambda x: int(x['confusion_matrix'][0, 0]),
         'false_positive': lambda x: int(x['confusion_matrix'][0, 1]),
         'false_negative': lambda x: int(x['confusion_matrix'][1, 0]),
+        'auc': lambda x: float(x['auc'])
     }
 
     @classmethod
