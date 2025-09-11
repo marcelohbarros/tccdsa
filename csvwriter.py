@@ -43,8 +43,8 @@ class CsvRowData:
 
     _conversion = {
         'test_name': lambda x: x['test_name'],
-        'run_number': lambda x: int(x['run_number']),
         'dataset': lambda x: x['dataset'],
+        'run_number': lambda x: int(x['run_number']),
         'accuracy': lambda x: x['accuracy'],
         'precision_true': lambda x: float(x['precision'][1]),
         'precision_false': lambda x: float(x['precision'][0]),

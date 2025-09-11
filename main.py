@@ -10,21 +10,20 @@ from sklearn.preprocessing import StandardScaler
 
 import metrics as m
 import csvwriter as cw
+import config as cfg
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Read a CSV file and print its contents.")
     parser.add_argument('--data_path', type=str, default='tccdsa/datasets', help='Path to the CSV file to open (default: datasets/tomcat.csv)')
-    parser.add_argument('--metrics', type=str, nargs='+', default=[], help='List of column names to read from the CSV file (default: all columns)')
-    parser.add_argument('--train_len', type=float, default=0.7, help='Proportion of data to use for training (default: 0.7)')
-    parser.add_argument('--balance_ratio', type=float, default=0.5, help='If set, upsample bug=True rows until the ratio is equal to the balance_ratio (default: 0.5)')
-    parser.add_argument('--use_boolean_model', action='store_true', help='If set, use a model that predicts bugs based on booleans instead of ints (default: False)')
-    parser.add_argument('--extract_features', type=int, default=None, help='If set, extract features using PCA (default: None). The value indicates the number of components to keep.')
     parser.add_argument('--repetitions', type=int, default=10, help='Number of times to repeat each experiment (default: 10)')
+    parser.add_argument('--preset', type=str, nargs='+', choices=cfg.PreSet.all_preset_names(), default=[], help='If set, use a predefined configuration (default: all presets)')
 
     args = parser.parse_args()
-    metrics = m.ArgumentMetrics(args.metrics, validate=True)
 
-    return args.data_path, metrics, args.train_len, args.balance_ratio, args.use_boolean_model, args.extract_features, args.repetitions
+    presets = cfg.PreSet.preset_from_names(args.preset)
+
+    return args.data_path, args.repetitions, presets
 
 
 def load_data(data_path, metrics):
@@ -179,25 +178,35 @@ def save_results_to_csv(writer, *row_data):
 
 
 def main():
-    data_path, argument_metrics, train_len, balance_ratio, use_boolean_model, features_number, repetitions = parse_args()
+    data_path, repetitions, presets = parse_args()
     random_seed = generate_random_seed()
-    data = load_data(data_path, argument_metrics)
     writer = cw.CsvWriter('log/results.csv')
-    for dataset, (df, csv_file_metrics, tags) in data.items():
-        for run_number in range(0, repetitions):
-            test_name = dataset
-            print("------------------------------------")
-            print(f"Processing dataset: {dataset}")
-            name_tag = csv_file_metrics.get_name_tag()
-            bug_tag = csv_file_metrics.get_bug_tag()
-            print_data_stats(df, tags, bug_tag)
-            df = normalize_data(df, name_tag, bug_tag)
-            if features_number:
-                df = extract_features(df, name_tag, bug_tag, features_number)
-            train_df, validation_df, random_seed = split_data(df, train_len)
-            train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
-            clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
-            evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
+
+    for preset in presets:
+        print(f"Using configuration: {preset.name} - {preset.description}")
+
+        test_name = preset.name
+        argument_metrics = m.ArgumentMetrics(preset.metrics, validate=True)
+        train_len = preset.train_len
+        balance_ratio = preset.balance_ratio
+        use_boolean_model = preset.use_boolean_model
+        features_number = preset.pca_features
+    
+        data = load_data(data_path, argument_metrics)
+        for dataset, (df, csv_file_metrics, tags) in data.items():
+            for run_number in range(0, repetitions):
+                print("------------------------------------")
+                print(f"Processing dataset: {dataset}")
+                name_tag = csv_file_metrics.get_name_tag()
+                bug_tag = csv_file_metrics.get_bug_tag()
+                print_data_stats(df, tags, bug_tag)
+                df = normalize_data(df, name_tag, bug_tag)
+                if features_number:
+                    df = extract_features(df, name_tag, bug_tag, features_number)
+                train_df, validation_df, random_seed = split_data(df, train_len)
+                train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
+                clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
+                evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
 
 
 if __name__ == "__main__":
