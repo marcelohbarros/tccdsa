@@ -2,9 +2,11 @@ import csv
 import pathlib
 import atexit
 
+from log import print_verbose
+
 class CsvWriter:
     def __init__(self, file_path):
-        print(f"Creating csv file to save the results: {file_path}")
+        print_verbose(f"Creating csv file to save the results: {file_path}")
         self._path = pathlib.Path(file_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self._path.open(mode='w', newline='')
@@ -22,7 +24,7 @@ class CsvWriter:
         self._writer.writerow(data)
 
     def close(self):
-        print(f"Closing CSV file: {self._path}")        
+        print_verbose(f"Closing CSV file: {self._path}")        
         if self._is_open:
             self._file.close()
             self._is_open = False
