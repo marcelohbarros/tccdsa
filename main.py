@@ -203,6 +203,7 @@ def main():
                 clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
                 evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
             print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
+    print("\nAll tests completed.")
 
 if __name__ == "__main__":
     main()

@@ -24,7 +24,7 @@ class CsvWriter:
         self._writer.writerow(data)
 
     def close(self):
-        print_verbose(f"Closing CSV file: {self._path}")        
+        print(f"Closing CSV file: {self._path}")        
         if self._is_open:
             self._file.close()
             self._is_open = False
