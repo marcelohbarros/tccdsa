@@ -141,6 +141,8 @@ def normalize_data(df, name_tag, bug_tag):
 
 def extract_features(df, name_tag, bug_tag, features_number):
     print_verbose("Extracting features...")
+    if not features_number:
+        return df
 
     feature_columns = [col for col in df.columns if col not in [name_tag, bug_tag]]
     x_features = df[feature_columns]
@@ -173,15 +175,8 @@ def main():
     for preset in cfg.presets:
         print("\r============================================")
         print(f"Using configuration: {preset.name} - {preset.description}")
-
-        test_name = preset.name
-        metrics = preset.metrics
-        train_len = preset.train_len
-        balance_ratio = preset.balance_ratio
-        use_boolean_model = preset.use_boolean_model
-        features_number = preset.pca_features
     
-        data = load_data(cfg.data_path, metrics)
+        data = load_data(cfg.data_path, preset.metrics)
         number_of_tests = len(cfg.presets) * len(data)
 
         for dataset, (df, csv_file_metrics, tags) in data.items():
@@ -195,12 +190,11 @@ def main():
                 bug_tag = csv_file_metrics.get_bug_tag()
                 print_data_stats(df, tags, bug_tag)
                 df = normalize_data(df, name_tag, bug_tag)
-                if features_number:
-                    df = extract_features(df, name_tag, bug_tag, features_number)
-                train_df, validation_df, random_seed = split_data(df, train_len)
-                train_df = balance_data(train_df, bug_tag, balance_ratio, random_seed)
-                clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model)
-                evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
+                df = extract_features(df, name_tag, bug_tag, preset.pca_features)
+                train_df, validation_df, random_seed = split_data(df, preset.train_len)
+                train_df = balance_data(train_df, bug_tag, preset.balance_ratio, random_seed)
+                clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, preset.use_boolean_model)
+                evaluate_model(preset.name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
             print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
     print("\nAll tests completed.")
 
