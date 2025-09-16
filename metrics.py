@@ -1,45 +1,36 @@
 import csv
 
-class Metric:
-    all_tags = None
-    all_metrics = None
+import utils
 
-    def __new__(cls, *args):
+class Metric(utils.HashableElement):
+    all_tags = None
+
+    def __new__(cls, *args, **kwargs):
         if cls.all_tags is None:
             cls.all_tags = set()
-        if cls.all_metrics is None:
-            cls.all_metrics = []
 
         name = args[0]
-        description = args[1]
         tags = [tag.lower() for tag in args[2]]
 
         for tag in tags:
             if tag in cls.all_tags:
                 raise ValueError(f"Tag '{tag}' already exists in Metric class.")
 
+        obj = super().__new__(cls, *args, **kwargs)
         cls.all_tags.update({tag.lower() for tag in tags})
-
-        obj = super().__new__(cls)
-        obj.__init__(name, description, tags)
-        cls.all_metrics.append(obj)
         return obj
 
     @classmethod
-    def get_metric(cls, tag):
+    def from_tag(cls, tag):
         tag = tag.lower()
-        for m in cls.all_metrics:
+        for m in cls.all():
             if tag in m.tags:
                 return m
 
     def __init__(self, name, description, tags):
-        self._name = name
+        super().__init__(name)
         self._tags = {tag.lower() for tag in tags}
         self._description = description
-
-    @property
-    def name(self):
-        return self._name
 
     @property
     def tags(self):
@@ -52,8 +43,6 @@ class Metric:
     def __repr__(self):
         return f"Metric(\"{self._name}\", \"{self._description}\", [\"{'", "'.join(self._tags)}\"])"
 
-    def __hash__(self):
-        return hash((self._name.upper(),))
 
 # Obligatory columns
 NAME = Metric("NAME", "Name", ["name", "SHA"])
@@ -102,7 +91,7 @@ class ArgumentMetrics:
     def __init__(self, tags, validate=False):
         self._required_columns = {NAME, BUG}
         self._metrics = self._required_columns.copy()
-        self._metrics.update({Metric.get_metric(tag) for tag in tags})
+        self._metrics.update({Metric.from_tag(tag) for tag in tags})
         if None in self._metrics:
             self._metrics.remove(None)
             if validate:
@@ -122,7 +111,7 @@ class ArgumentMetrics:
 
 class MetricTag:
     def __init__(self, tag):
-        self._metric = Metric.get_metric(tag)
+        self._metric = Metric.from_tag(tag)
         self._tag = tag
 
     def is_valid(self):
