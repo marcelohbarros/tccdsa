@@ -13,21 +13,12 @@ class PreSet(utils.HashableElement):
     def __init__(self, name, description, metrics=Default.METRICS, train_len=Default.TRAIN_LEN,
                  balance_ratio=Default.BALANCE_RATIO, use_boolean_model=Default.USE_BOOLEAN_MODEL,
                  pca_features=Default.PCA_FEATURES):
-        super().__init__(name)
-        self._description = description
+        super().__init__(name, description)
         self._metrics = metrics if metrics is not None else []
         self._train_len = train_len
         self._balance_ratio = balance_ratio
         self._use_boolean_model = use_boolean_model
         self._pca_features = pca_features
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def description(self):
-        return self._description
 
     @property
     def metrics(self):

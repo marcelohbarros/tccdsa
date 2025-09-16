@@ -28,17 +28,12 @@ class Metric(utils.HashableElement):
                 return m
 
     def __init__(self, name, description, tags):
-        super().__init__(name)
+        super().__init__(name, description)
         self._tags = {tag.lower() for tag in tags}
-        self._description = description
 
     @property
     def tags(self):
         return self._tags
-    
-    @property
-    def description(self):
-        return self._description
 
     def __repr__(self):
         return f"Metric(\"{self._name}\", \"{self._description}\", [\"{'", "'.join(self._tags)}\"])"
