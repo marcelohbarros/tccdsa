@@ -13,14 +13,13 @@ import config as cfg
 from log import print_verbose
 
 
-def load_data(data_path, metrics):
+def load_data(data_path):
     def get_db_from_file(full_path):
         print_verbose(f"Reading data from: {full_path}")
         csv_file_metrics = m.FileMetrics(full_path)
-        tags = csv_file_metrics.get_tags(argument_metrics=metrics, validate=False)
 
-        df = pandas.read_csv(full_path, usecols=tags)    
-        return df, csv_file_metrics, tags
+        df = pandas.read_csv(full_path)
+        return df, csv_file_metrics
 
     data = {}
     if os.path.isdir(data_path):
@@ -29,14 +28,30 @@ def load_data(data_path, metrics):
         files = [f for f in os.listdir(dir) if f.endswith('.csv')]
         for file in files:
             full_path = os.path.join(dir, file)
-            df, csv_file_metrics, tags = get_db_from_file(full_path)
-            data[file] = (df, csv_file_metrics, tags)
+            df, csv_file_metrics = get_db_from_file(full_path)
+            data[file] = (df, csv_file_metrics)
     else:
         file = os.path.basename(data_path)
-        df, csv_file_metrics, tags = get_db_from_file(data_path)
-        data[file] = (df, csv_file_metrics, tags)
+        df, csv_file_metrics = get_db_from_file(data_path)
+        data[file] = (df, csv_file_metrics)
     print_verbose(f"Found {len(data)} dataset(s).")
     return data
+
+
+def filter_metrics(data, metrics):
+    filtered_data = {}
+    for dataset, (df, csv_file_metrics) in data.items():
+        tags = csv_file_metrics.filter_tags(metrics)
+        name_tag = csv_file_metrics.get_name_tag()
+        bug_tag = csv_file_metrics.get_bug_tag()
+        if name_tag is None or bug_tag is None:
+            raise ValueError(f"A name or bug column is missing in the dataset '{dataset}'.")
+        if not tags:
+            raise ValueError(f"No valid metrics found in the dataset '{dataset}' for the given preset metrics.")
+
+        filtered_df = df[tags].copy()
+        filtered_data[dataset] = (filtered_df, tags, name_tag, bug_tag)
+    return filtered_data
 
 
 def print_data_stats(df, tags, bug_tag):
@@ -169,25 +184,24 @@ def save_results_to_csv(writer, *row_data):
 def main():
     random_seed = generate_random_seed()
     writer = cw.CsvWriter('log/results.csv')
+    data = load_data(cfg.data_path)
 
+    number_of_tests = len(cfg.presets) * len(data)
     current_test = 0
 
     for preset in cfg.presets:
         print("\r============================================")
         print(f"Using configuration: {preset.name} - {preset.description}")
     
-        data = load_data(cfg.data_path, preset.metrics)
-        number_of_tests = len(cfg.presets) * len(data)
+        filtered_data = filter_metrics(data, preset.metrics)
 
-        for dataset, (df, csv_file_metrics, tags) in data.items():
+        for dataset, (df, tags, name_tag, bug_tag) in filtered_data.items():
             current_test += 1
             print(f"\rRunning test {current_test} of {number_of_tests}...")
 
             for run_number in range(0, cfg.repetitions):
                 print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
                 print_verbose(f"Processing dataset: {dataset}")
-                name_tag = csv_file_metrics.get_name_tag()
-                bug_tag = csv_file_metrics.get_bug_tag()
                 print_data_stats(df, tags, bug_tag)
                 df = normalize_data(df, name_tag, bug_tag)
                 df = extract_features(df, name_tag, bug_tag, preset.pca_features)

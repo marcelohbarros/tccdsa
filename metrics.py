@@ -116,41 +116,18 @@ class FileMetrics:
         if self.get_bug_tag() is None:
             raise ValueError("A bug column is required in the CSV file.")
 
-    def get_metric(self, tag):
-        for metric in self._metrics:
-            if metric.tag == tag:
-                return metric.metric
+    def filter_tags(self, filter_metrics):
+        if not filter_metrics or filter_metrics.is_empty():
+            return self.get_all_tags()
+        return [metric.tag for metric in self._metrics if metric.metric in filter_metrics.metrics]
 
-    def get_metrics(self, *, tags=None, validate=False):
-        if tags is None:
-            return self.get_all_metrics()
-
-        metrics = [self.get_metric(tag) for tag in tags]
-        if validate and None in metrics:
-            raise ValueError(f"A metric was not found from the tags: '{tags}'")
-
-        return metrics
-
-    def get_all_metrics(self):
+    def get_all(self):
         return [metric.metric for metric in self._metrics]
 
-    def get_tag(self, metric, validate=False):
+    def get_tag(self, metric):
         for m in self._metrics:
             if m.metric == metric:
                 return m.tag
-            
-        if validate:
-            raise ValueError(f"A tag was not found from the metric: '{metric}' in the file columns: '{self.get_all_tags()}'")
-
-    def get_tags(self, *, metrics=None, argument_metrics=None, validate=False):
-        if not argument_metrics.is_empty() and argument_metrics is not None:
-            metrics = argument_metrics.metrics
-
-        if metrics is None:
-            return self.get_all_tags()
-
-        tags = [self.get_tag(metric, validate) for metric in metrics if self.get_tag(metric) is not None]
-        return tags
 
     def get_all_tags(self):
         return [metric.tag for metric in self._metrics]
