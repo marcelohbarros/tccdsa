@@ -175,13 +175,13 @@ def main():
         print(f"Using configuration: {preset.name} - {preset.description}")
 
         test_name = preset.name
-        argument_metrics = m.ArgumentMetrics(preset.metrics, validate=True)
+        metrics = preset.metrics
         train_len = preset.train_len
         balance_ratio = preset.balance_ratio
         use_boolean_model = preset.use_boolean_model
         features_number = preset.pca_features
     
-        data = load_data(cfg.data_path, argument_metrics)
+        data = load_data(cfg.data_path, metrics)
         number_of_tests = len(cfg.presets) * len(data)
 
         for dataset, (df, csv_file_metrics, tags) in data.items():

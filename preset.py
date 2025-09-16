@@ -1,3 +1,4 @@
+import metrics
 import utils
 
 class Default:
@@ -14,7 +15,8 @@ class PreSet(utils.HashableElement):
                  balance_ratio=Default.BALANCE_RATIO, use_boolean_model=Default.USE_BOOLEAN_MODEL,
                  pca_features=Default.PCA_FEATURES):
         super().__init__(name, description)
-        self._metrics = metrics if metrics is not None else []
+        self._metric_tags = metrics if metrics is not None else []
+        self._metrics = PreSetMetrics(self._metric_tags)
         self._train_len = train_len
         self._balance_ratio = balance_ratio
         self._use_boolean_model = use_boolean_model
@@ -41,7 +43,28 @@ class PreSet(utils.HashableElement):
         return self._pca_features
 
     def __repr__(self):
-        return f"PreSet(name=\"{self._name}\", description=\"{self._description}\", metrics={self._metrics}, train_len={self._train_len}, balance_ratio={self._balance_ratio}, use_boolean_model={self._use_boolean_model}, pca_features={self._pca_features})"
+        return f"PreSet(name=\"{self._name}\", description=\"{self._description}\", metrics={self._metric_tags}, train_len={self._train_len}, balance_ratio={self._balance_ratio}, use_boolean_model={self._use_boolean_model}, pca_features={self._pca_features})"
+
+
+class PreSetMetrics:
+    def __init__(self, tags):
+        self._required_columns = {metrics.NAME, metrics.BUG}
+        self._metrics = self._required_columns.copy()
+        self._metrics.update({metrics.Metric.from_tag(tag) for tag in tags})
+        if None in self._metrics:
+            self._metrics.remove(None)
+            raise ValueError(f"A metric was not found from the tags: '{tags}'")
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    def is_empty(self):
+        return len(self._metrics) == len(self._required_columns)
+
+    @property
+    def required_columns(self):
+        return self._required_columns
 
 
 DEFAULT = PreSet("default", "Default settings")
@@ -71,4 +94,3 @@ PCA_10_BOOLEAN = PreSet("pca_10_boolean", "PCA with 10 features and boolean mode
 PCA_15_BOOLEAN = PreSet("pca_15_boolean", "PCA with 15 features and boolean model", pca_features=15, use_boolean_model=True)
 PCA_20_BOOLEAN = PreSet("pca_20_boolean", "PCA with 20 features and boolean model", pca_features=20, use_boolean_model=True)
 PCA_25_BOOLEAN = PreSet("pca_25_boolean", "PCA with 25 features and boolean model", pca_features=25, use_boolean_model=True)
-

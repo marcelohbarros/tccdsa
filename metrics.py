@@ -9,7 +9,6 @@ class Metric(utils.HashableElement):
         if cls.all_tags is None:
             cls.all_tags = set()
 
-        name = args[0]
         tags = [tag.lower() for tag in args[2]]
 
         for tag in tags:
@@ -80,28 +79,6 @@ UNIQUE_WORD_COUNT = Metric("UNIQUE_WORD_COUNT", "Number of Unique Words", ["uniq
 VARIABLE_COUNT = Metric("VARIABLE_COUNT", "Number of Variables", ["variablesQty"])
 VERSION = Metric("VERSION", "Project version", ["version"])
 WMC = Metric("WMC", "Weighted Methods per Class", ["wmc"])
-
-
-class ArgumentMetrics:
-    def __init__(self, tags, validate=False):
-        self._required_columns = {NAME, BUG}
-        self._metrics = self._required_columns.copy()
-        self._metrics.update({Metric.from_tag(tag) for tag in tags})
-        if None in self._metrics:
-            self._metrics.remove(None)
-            if validate:
-                raise ValueError(f"A metric was not found from the tags: '{tags}'")
-
-    @property
-    def metrics(self):
-        return self._metrics
-
-    def is_empty(self):
-        return len(self._metrics) == len(self._required_columns)
-
-    @property
-    def required_columns(self):
-        return self._required_columns
 
 
 class MetricTag:
