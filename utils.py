@@ -16,6 +16,9 @@ class HashableElement(abc.ABC):
 
         return obj
 
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and self.name.upper() == other.name.upper()
+
     def __init__(self, name, description):
         self._name = name
         self._description = description
@@ -29,7 +32,7 @@ class HashableElement(abc.ABC):
         return self._description
 
     def __hash__(self):
-        return hash((self.__class__.__module__, self.__class__.__name__, self._name.upper()))
+        return hash((self._name.upper(),))
 
     @classmethod
     def from_name(cls, name):
