@@ -5,14 +5,14 @@ class HashableElement(abc.ABC):
 
     def __new__(cls, *args, **kwargs):
         if cls.all_elements is None:
-            cls.all_elements = {}
+            cls.all_elements = set()
 
         obj = super().__new__(cls)
         obj.__init__(*args, **kwargs)
 
-        if obj.name in cls.all_elements:
+        if obj in cls.all_elements:
             raise ValueError(f"'{obj.name}' already exists.")
-        cls.all_elements[obj.name] = obj
+        cls.all_elements.add(obj)
 
         return obj
 
@@ -28,9 +28,10 @@ class HashableElement(abc.ABC):
 
     @classmethod
     def from_name(cls, name):
-        if cls.all_elements is None or name not in cls.all_elements:
-            raise ValueError(f"'{name}' does not exist.")
-        return cls.all_elements[name]
+        for element in cls.all_elements:
+            if element.name == name:
+                return element
+        raise ValueError(f"'{name}' does not exist.")
     
     @classmethod
     def from_names(cls, names):
@@ -39,11 +40,11 @@ class HashableElement(abc.ABC):
     @classmethod
     def all(cls):
         if cls.all_elements is None:
-            return []
-        return list(cls.all_elements.values())
+            return set()
+        return cls.all_elements
 
     @classmethod
     def all_names(cls):
         if cls.all_elements is None:
             return []
-        return list(cls.all_elements.keys())
+        return [element.name for element in cls.all_elements]
