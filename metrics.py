@@ -3,20 +3,20 @@ import csv
 import utils
 
 class Metric(utils.HashableElement):
-    all_tags = None
+    __all_tags = None
 
     def __new__(cls, *args, **kwargs):
-        if cls.all_tags is None:
-            cls.all_tags = set()
+        if cls.__all_tags is None:
+            cls.__all_tags = set()
 
         tags = [tag.lower() for tag in args[2]]
 
         for tag in tags:
-            if tag in cls.all_tags:
+            if tag in cls.__all_tags:
                 raise ValueError(f"Tag '{tag}' already exists in Metric class.")
 
         obj = super().__new__(cls, *args, **kwargs)
-        cls.all_tags.update({tag.lower() for tag in tags})
+        cls.__all_tags.update({tag.lower() for tag in tags})
         return obj
 
     @classmethod

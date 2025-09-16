@@ -8,6 +8,7 @@ class Default:
     USE_BOOLEAN_MODEL = False
     PCA_FEATURES = None
 
+
 class PreSet(utils.HashableElement):
     all_presets = None
 
