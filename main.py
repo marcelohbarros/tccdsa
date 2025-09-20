@@ -1,4 +1,5 @@
 import os
+import traceback
 
 import numpy as np
 import pandas
@@ -111,7 +112,7 @@ def train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model):
     return clf, feature_columns
 
 
-def evaluate_model(test_name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer):
+def evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset):
     print_verbose("Evaluating model...")
     print_verbose("-----")
     print_verbose(f"Results for dataset '{dataset}':")
@@ -132,6 +133,8 @@ def evaluate_model(test_name, run_number, clf, feature_columns, validation_df, b
     print_verbose("Classification report:")
     print_verbose(classification_report(y_val, y_pred, zero_division=0))
 
+    auc = None
+
     # Calculate AUC if possible
     try:
         if hasattr(clf, "predict_proba"):
@@ -143,7 +146,7 @@ def evaluate_model(test_name, run_number, clf, feature_columns, validation_df, b
     except Exception as e:
         print(f"Error calculating AUC: {e}")
 
-    save_results_to_csv(writer, test_name, run_number, dataset, acc, prec, rec, f1, cm, auc)
+    return acc, prec, rec, f1, cm, auc
 
 
 def normalize_data(df, name_tag, bug_tag):
@@ -175,42 +178,52 @@ def generate_random_seed():
     return rng.integers(0, 2**32 - 1)
 
 
-def save_results_to_csv(writer, *row_data):
-    print_verbose("Saving results to CSV...")
-    row = cw.CsvRowData(*row_data)
-    writer.write(row.to_dict())
-
-
 def main():
     random_seed = generate_random_seed()
     writer = cw.CsvWriter('log/results.csv')
     data = load_data(cfg.data_path)
 
     number_of_tests = len(cfg.presets) * len(data)
-    current_test = 0
+    test_id = 0
 
-    for preset in cfg.presets:
-        print("\r============================================")
-        print(f"Using configuration: {preset.name} - {preset.description}")
-    
-        filtered_data = filter_metrics(data, preset.metrics)
+    try:
+        for preset in cfg.presets:
+            print("\r============================================")
+            print(f"Using configuration: {preset.name} - {preset.description}")
+        
+            filtered_data = filter_metrics(data, preset.metrics)
 
-        for dataset, (df, tags, name_tag, bug_tag) in filtered_data.items():
-            current_test += 1
-            print(f"\rRunning test {current_test} of {number_of_tests}...")
+            for dataset, (df, tags, name_tag, bug_tag) in filtered_data.items():
+                test_id += 1
+                rep_id = 1000 * test_id
+                print(f"\rRunning test {test_id} of {number_of_tests}...")
+                for run_number in range(0, cfg.repetitions):
+                    rep_id += 1
+                    print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
+                    print_verbose(f"Processing dataset: {dataset}")
+                    print_data_stats(df, tags, bug_tag)
+                    df = normalize_data(df, name_tag, bug_tag)
+                    df = extract_features(df, name_tag, bug_tag, preset.pca_features)
+                    train_df, validation_df, random_seed = split_data(df, preset.train_len)
+                    train_df = balance_data(train_df, bug_tag, preset.balance_ratio, random_seed)
+                    clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, preset.use_boolean_model)
+                    acc, prec, rec, f1, cm, auc = evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset)
+                    cw.save_results_to_csv(writer, rep_id, test_id, preset.name, dataset, run_number, len(feature_columns), acc, prec, rec, f1, cm, auc)
 
-            for run_number in range(0, cfg.repetitions):
-                print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
-                print_verbose(f"Processing dataset: {dataset}")
-                print_data_stats(df, tags, bug_tag)
-                df = normalize_data(df, name_tag, bug_tag)
-                df = extract_features(df, name_tag, bug_tag, preset.pca_features)
-                train_df, validation_df, random_seed = split_data(df, preset.train_len)
-                train_df = balance_data(train_df, bug_tag, preset.balance_ratio, random_seed)
-                clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, preset.use_boolean_model)
-                evaluate_model(preset.name, run_number, clf, feature_columns, validation_df, bug_tag, dataset, writer)
-            print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
-    print("\nAll tests completed.")
+                print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
+        print("\nAll tests completed.")
+
+    # Ctrl C
+    except KeyboardInterrupt:
+        print("\nProcess interrupted by user.")
+        print(f"Ran {test_id} of {number_of_tests} tests.")
+
+    #except Exception:
+    #    print(f"\nAn error occurred: {traceback.format_exc()}")
+    #    print(f"Ran {test_id} of {number_of_tests} tests.")
+
+    finally:
+        writer.close()
 
 if __name__ == "__main__":
     main()

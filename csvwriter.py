@@ -1,6 +1,5 @@
 import csv
 import pathlib
-import atexit
 
 from log import print_verbose
 
@@ -14,7 +13,6 @@ class CsvWriter:
         self._writer = csv.DictWriter(self._file, fieldnames=self._field_names)
         self._writer.writeheader()
         self._is_open = True
-        atexit.register(self.close)
 
     def write(self, data):
         if set(data.keys()) != set(self._field_names):
@@ -32,9 +30,12 @@ class CsvWriter:
 
 class CsvRowData:
     _input_format = [
+        'rep_id',
+        'test_id',
         'test_name',
-        'run_number',
         'dataset',
+        'run_number',
+        'number_of_features',
         'accuracy',
         'precision',
         'recall',
@@ -44,6 +45,8 @@ class CsvRowData:
     ]
 
     _conversion = {
+        'rep_id': lambda x: x['rep_id'],
+        'test_id': lambda x: x['test_id'],
         'test_name': lambda x: x['test_name'],
         'dataset': lambda x: x['dataset'],
         'run_number': lambda x: int(x['run_number']),
@@ -58,7 +61,7 @@ class CsvRowData:
         'true_negative': lambda x: int(x['confusion_matrix'][0, 0]),
         'false_positive': lambda x: int(x['confusion_matrix'][0, 1]),
         'false_negative': lambda x: int(x['confusion_matrix'][1, 0]),
-        'auc': lambda x: float(x['auc'])
+        'auc': lambda x: float(x['auc']) if x['auc'] is not None else None
     }
 
     @classmethod
@@ -74,3 +77,9 @@ class CsvRowData:
 
     def to_dict(self):
         return self._data
+    
+
+def save_results_to_csv(writer, *row_data):
+    print_verbose("Saving results to CSV...")
+    row = CsvRowData(*row_data)
+    writer.write(row.to_dict())
