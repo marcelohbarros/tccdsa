@@ -13,7 +13,6 @@ from log import print_verbose, print_not_verbose
 class Runner():
     _data = None
     _number_of_tests = None
-    _writer = None
 
     def __init__(self):
         raise ValueError("Not instantiable")
@@ -30,11 +29,6 @@ class Runner():
             cls._number_of_tests = len(cfg.presets) * len(cls.data())
         return cls._number_of_tests
 
-    @classmethod
-    def writer(cls):
-        if cls._writer is None:
-            cls._writer = cw.CsvWriter('log/results.csv')
-        return cls._writer
 
     @classmethod
     def iter_tests(cls):
@@ -88,6 +82,7 @@ class Runner():
 
 
 class Test():
+    _writer = None
     __count = 0
 
     def __init__(self, id, dataset, df, tags, name_tag, bug_tag, preset):
@@ -99,6 +94,12 @@ class Test():
         self._bug_tag = bug_tag
         self._preset = preset
         self._test_count = self.count()
+        self._data = [
+            self._id,
+            self._dataset,
+            self._preset.balance_ratio,
+            self._preset.use_boolean_model
+        ]
 
     @classmethod
     def count(cls):
@@ -113,8 +114,19 @@ class Test():
             yield Model(rep_id, self._dataset, self._df, self._tags, self._name_tag, self._bug_tag, self._preset)
             print_not_verbose(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
 
+    def save_results(self):
+        self.writer().write(self._data)
+
+    @classmethod
+    def writer(cls):
+        if cls._writer is None:
+            cls._writer = cw.TestCsvWriter()
+        return cls._writer
+
 
 class Model():
+    _writer = None
+
     def __init__(self, rep_id, dataset, df, tags, name_tag, bug_tag, preset):
         self._rep_id = rep_id
         self._dataset = dataset
@@ -138,9 +150,6 @@ class Model():
         self._data = [
             self._rep_id,
             self._test_id,
-            self._run_number,
-            self._preset.name,
-            self._dataset,
             len(feature_columns),
             accuracy,
             precision,
@@ -151,7 +160,13 @@ class Model():
         ]
 
     def save_results(self):
-        cw.save_results_to_csv(Runner.writer(), *self._data)
+        self.writer().write(self._data)
+
+    @classmethod
+    def writer(cls):
+        if cls._writer is None:
+            cls._writer = cw.ModelCsvWriter()
+        return cls._writer
 
     def __normalize_data(self):
         print_verbose("Normalizing data...")
@@ -274,6 +289,7 @@ def main():
             for model in test:
                 model.run()
                 model.save_results()
+            test.save_results()
 
         print("\nAll tests completed.")
 
@@ -284,7 +300,8 @@ def main():
     #    print(f"\nAn error occurred: {traceback.format_exc()}")
     #    print(f"Ran {test_id} of {number_of_tests} tests.")
     finally:
-        Runner.writer().close()
+        Test.writer().close()
+        Model.writer().close()
 
 if __name__ == "__main__":
     main()

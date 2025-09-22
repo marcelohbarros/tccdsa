@@ -1,27 +1,32 @@
-import atexit
+import abc
 import csv
 import pathlib
 
 from log import print_verbose
 
-class CsvWriter:
-    def __init__(self, file_path):
-        print_verbose(f"Creating csv file to save the results: {file_path}")
-        self._path = pathlib.Path(file_path)
+class CsvWriter(abc.ABC):
+    _file = None
+    _row_data_class = None
+
+    def __init__(self):
+        if self._file is None or self._row_data_class is None:
+            raise NotImplementedError("Subclasses must define _file and _row_data_class")
+        print_verbose(f"Creating csv file to save the results: {self._file}")
+        self._path = pathlib.Path(self._file)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self._path.open(mode='w', newline='')
-        self._field_names = CsvRowData.get_csv_row_names()
+        self._field_names = self._row_data_class.get_csv_row_names()
         self._writer = csv.DictWriter(self._file, fieldnames=self._field_names)
         self._writer.writeheader()
         self._is_open = True
-        atexit.register(self.close)
 
     def write(self, data):
-        if set(data.keys()) != set(self._field_names):
+        row = self._row_data_class(*data).to_dict()
+        if set(row.keys()) != set(self._field_names):
             raise ValueError("Data keys do not match the field names")
         if not self._is_open:
             raise ValueError("The file is already closed")
-        self._writer.writerow(data)
+        self._writer.writerow(row)
 
     def close(self):
         print(f"Closing CSV file: {self._path}")        
@@ -30,13 +35,33 @@ class CsvWriter:
             self._is_open = False
 
 
-class CsvRowData:
+class CsvRowData(abc.ABC):
+    _input_format = None
+    _conversion = None
+
+    @classmethod
+    def get_csv_row_names(cls):
+        if cls._conversion is None:
+            raise NotImplementedError("Subclasses must define _conversion")
+        return list(cls._conversion.keys())
+
+    def __init__(self, *inputs):
+        if self._input_format is None or self._conversion is None:
+            raise NotImplementedError("Subclasses must define _input_format and _conversion")
+        if len(inputs) != len(self._input_format):
+            raise ValueError(f"Expected {len(self._input_format)} inputs, got {len(inputs)}")
+
+        self._inputs = {name: value for name, value in zip(self._input_format, inputs)}
+        self._data = {name: self._conversion[name](self._inputs) for name in self._conversion.keys()}
+
+    def to_dict(self):
+        return self._data
+    
+
+class ModelCsvRowData(CsvRowData):
     _input_format = [
-        'rep_id',
+        'id',
         'test_id',
-        'run_number',
-        'test_name',
-        'dataset',
         'number_of_features',
         'accuracy',
         'precision',
@@ -47,11 +72,9 @@ class CsvRowData:
     ]
 
     _conversion = {
-        'rep_id': lambda x: x['rep_id'],
+        'id': lambda x: x['id'],
         'test_id': lambda x: x['test_id'],
-        'run_number': lambda x: int(x['run_number']),
-        'test_name': lambda x: x['test_name'],
-        'dataset': lambda x: x['dataset'],
+        'number_of_features': lambda x: int(x['number_of_features']),
         'accuracy': lambda x: x['accuracy'],
         'precision_true': lambda x: float(x['precision'][1]),
         'precision_false': lambda x: float(x['precision'][0]),
@@ -66,22 +89,27 @@ class CsvRowData:
         'auc': lambda x: float(x['auc']) if x['auc'] is not None else None
     }
 
-    @classmethod
-    def get_csv_row_names(cls):
-        return list(cls._conversion.keys())
 
-    def __init__(self, *inputs):
-        if len(inputs) != len(self._input_format):
-            raise ValueError(f"Expected {len(self._input_format)} inputs, got {len(inputs)}")
+class TestCsvRowData(CsvRowData):
+    _input_format = [
+        'id',
+        'dataset',
+        'balance_ratio',
+        'use_boolean_model'
+    ]
 
-        self._inputs = {name: value for name, value in zip(self._input_format, inputs)}
-        self._data = {name: self._conversion[name](self._inputs) for name in self._conversion.keys()}
+    _conversion = {
+        'id': lambda x: x['id'],
+        'dataset': lambda x: x['dataset'],
+        'balance_ratio': lambda x: float(x['balance_ratio']),
+        'use_boolean_model': lambda x: bool(x['use_boolean_model'])
+    }
 
-    def to_dict(self):
-        return self._data
-    
 
-def save_results_to_csv(writer, *row_data):
-    print_verbose("Saving results to CSV...")
-    row = CsvRowData(*row_data)
-    writer.write(row.to_dict())
+class ModelCsvWriter(CsvWriter):
+    _file = 'log/models.csv'
+    _row_data_class = ModelCsvRowData
+
+class TestCsvWriter(CsvWriter):
+    _file = 'log/tests.csv'
+    _row_data_class = TestCsvRowData
