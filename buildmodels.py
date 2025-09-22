@@ -1,12 +1,8 @@
 import os
 import traceback
 
-import numpy as np
 import pandas
-from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_auc_score
-from sklearn.preprocessing import StandardScaler
+import sklearn
 
 import metrics as m
 import csvwriter as cw
@@ -15,20 +11,12 @@ from log import print_verbose, print_not_verbose
 
 
 class Runner():
-    _random_seed = None
     _data = None
     _number_of_tests = None
     _writer = None
 
     def __init__(self):
         raise ValueError("Not instantiable")
-
-    @classmethod
-    def random_seed(cls):
-        if cls._random_seed is None:
-            rng = np.random.default_rng()
-            cls._random_seed = rng.integers(0, 2**32 - 1)
-        return cls._random_seed
 
     @classmethod
     def data(cls):
@@ -118,7 +106,7 @@ class Test():
         return cls.__count
 
     def __iter__(self):
-        print(f"{'\r'*cfg.verbose}Running test {self.__count} of {Runner.number_of_tests()}... ({int(self.__count / Runner.number_of_tests() * 100)}%)")
+        print(f"{'\r'*(not cfg.verbose)}Running test {self.__count} of {Runner.number_of_tests()}... ({int(self.__count / Runner.number_of_tests() * 100)}%)")
         for run_number in range(0, cfg.repetitions):
             rep_id = 1000 * self._id + run_number
             print_not_verbose(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
@@ -140,12 +128,12 @@ class Model():
         self._data = []
 
     def run(self):
-        df = normalize_data(self._df, self._name_tag, self._bug_tag)
-        df = extract_features(df, self._name_tag, self._bug_tag, self._preset.pca_features)
-        train_df, validation_df, random_seed = split_data(df, self._preset.train_len)
-        train_df = balance_data(train_df, self._bug_tag, self._preset.balance_ratio, random_seed)
-        clf, feature_columns = train_model(train_df, random_seed, self._name_tag, self._bug_tag, self._preset.use_boolean_model)
-        acc, prec, rec, f1, cm, auc = evaluate_model(clf, feature_columns, validation_df, self._bug_tag, self._dataset)
+        self._df = self.__normalize_data()
+        self._df = self.__extract_features()
+        train_df, validation_df = self.__split_data()
+        train_df = self.__balance_data(train_df)
+        clf, feature_columns = self.__train_model(train_df)
+        accuracy, precision, recall, f1, confusion_matrix, auc = self.__evaluate_model(clf, feature_columns, validation_df)
         
         self._data = [
             self._rep_id,
@@ -154,16 +142,121 @@ class Model():
             self._preset.name,
             self._dataset,
             len(feature_columns),
-            acc,
-            prec,
-            rec,
+            accuracy,
+            precision,
+            recall,
             f1,
-            cm,
+            confusion_matrix,
             auc
         ]
 
     def save_results(self):
         cw.save_results_to_csv(Runner.writer(), *self._data)
+
+    def __normalize_data(self):
+        print_verbose("Normalizing data...")
+        feature_columns = [col for col in self._df.columns if col not in [self._name_tag, self._bug_tag]]
+        scaler = sklearn.preprocessing.StandardScaler()
+        df = self._df.copy()
+        df[feature_columns] = scaler.fit_transform(df[feature_columns])
+        return df
+
+    def __extract_features(self):
+        print_verbose("Extracting features...")
+        if not self._preset.pca_features:
+            return self._df
+
+        feature_columns = [col for col in self._df.columns if col not in [self._name_tag, self._bug_tag]]
+        x_features = self._df[feature_columns]
+        pca = sklearn.decomposition.PCA(n_components=min(len(feature_columns), self._preset.pca_features))
+        principal_components = pca.fit_transform(x_features)
+        pc_columns = [f'PC{i+1}' for i in range(principal_components.shape[1])]
+        df_pc = pandas.DataFrame(data=principal_components, columns=pc_columns)
+        df = pandas.concat([self._df[[self._name_tag, self._bug_tag]].reset_index(drop=True), df_pc.reset_index(drop=True)], axis=1)
+
+        return df
+
+    def __split_data(self):
+        train_len = self._preset.train_len
+        print_verbose(f"Splitting data into {train_len*100:.1f}% train and {(1-train_len)*100:.1f}% validation sets...")
+        train_df = self._df.sample(frac=train_len)
+        validation_df = self._df.drop(train_df.index)
+        print_verbose(f"train data count: {len(train_df)}")
+        print_verbose(f"validation data count: {len(validation_df)}")
+        return train_df, validation_df
+
+    def __balance_data(self, train_df):
+        """
+        Upsample bug>0 rows in df until the ratio of bug=True to total is > balance_ratio.
+        Returns the entire DataFrame (not just the training set).
+        """
+        balance_ratio = self._preset.balance_ratio
+        print_verbose(f"Balancing data to have at most {balance_ratio*100:.1f}% of bug>0 samples in the training set...")
+        bug_true = train_df[train_df[self._bug_tag] > 0]
+        n_total = len(train_df)
+        n_true = len(bug_true)
+        ratio = n_true / n_total if n_total > 0 else 0
+        print_verbose(f"Initial data: {n_total} samples ({n_true} bug>0, {n_total - n_true} bug=0, ratio={ratio:.2f})")
+        if n_true > 0 and ratio <= balance_ratio:
+            while True:
+                n_true = len(train_df[train_df[self._bug_tag] > 0])
+                n_total = len(train_df)
+                ratio = n_true / n_total
+                if ratio > balance_ratio:
+                    break
+                n_to_add = min(n_true, int(n_total * balance_ratio) - n_true)
+                n_to_add = max(1, n_to_add)
+                bug_true_upsampled = bug_true.sample(n=n_to_add, replace=True)
+                train_df = pandas.concat([train_df, bug_true_upsampled], ignore_index=True)
+            print_verbose(f"Data balanced: {n_total} samples ({n_true} bug>0, {n_total - n_true} bug=0, ratio={ratio:.2f})")
+        else:
+            print_verbose(f"Data already balanced")
+        return train_df
+    
+    def __train_model(self, train_df):
+        print_verbose("Training model...")
+        feature_columns = [col for col in train_df.columns if col not in [self._name_tag, self._bug_tag]]
+        X_train = train_df[feature_columns]
+        y_train = train_df[self._bug_tag].astype(bool) if self._preset._use_boolean_model else train_df[self._bug_tag]
+        clf = sklearn.ensemble.RandomForestClassifier()
+        clf.fit(X_train, y_train)
+        return clf, feature_columns
+
+    def __evaluate_model(self, clf, feature_columns, validation_df):
+        print_verbose("Evaluating model...")
+        print_verbose("-----")
+        print_verbose(f"Results for dataset '{self._dataset}':")
+        X_val = validation_df[feature_columns]
+        y_val = validation_df[self._bug_tag].astype(bool)
+        y_pred = clf.predict(X_val).astype(bool)
+        accuracy = sklearn.metrics.accuracy_score(y_val, y_pred)
+        precision = sklearn.metrics.precision_score(y_val, y_pred, zero_division=0, average=None)
+        recall = sklearn.metrics.recall_score(y_val, y_pred, zero_division=0, average=None)
+        f1 = sklearn.metrics.f1_score(y_val, y_pred, zero_division=0, average=None)
+        confusion_matrix = sklearn.metrics.confusion_matrix(y_val, y_pred)
+        print_verbose(f"Validation accuracy: {accuracy:.4f}")
+        print_verbose(f"Validation precision (False, True): {precision}")
+        print_verbose(f"Validation recall (False, True): {recall}")
+        print_verbose(f"Validation F1-score (False, True): {f1}")
+        print_verbose("Confusion matrix:")
+        print_verbose(confusion_matrix)
+        print_verbose("Classification report:")
+        print_verbose(sklearn.metrics.classification_report(y_val, y_pred, zero_division=0))
+
+        auc = None
+
+        # Calculate AUC if possible
+        try:
+            if hasattr(clf, "predict_proba"):
+                y_proba = clf.predict_proba(validation_df[feature_columns])[:, 1]
+                auc = sklearn.metrics.roc_auc_score(validation_df[self._bug_tag].astype(bool), y_proba)
+                print_verbose(f"Validation AUC: {auc:.4f}")
+            else:
+                print("AUC cannot be calculated: classifier does not support predict_proba.")
+        except Exception as e:
+            print(f"Error calculating AUC: {e}")
+
+        return accuracy, precision, recall, f1, confusion_matrix, auc
 
 
 def print_data_stats(df, tags, bug_tag):
@@ -173,115 +266,6 @@ def print_data_stats(df, tags, bug_tag):
     print_verbose(f"data count: {data_size}")
     print_verbose(f"modules with bugs: {bug_module_count} ({(bug_module_count / data_size) * 100:.2f}%)")
 
-
-def balance_data(df, bug_tag, balance_ratio, random_seed):
-    """
-    Upsample bug>0 rows in df until the ratio of bug=True to total is > balance_ratio.
-    Returns the entire DataFrame (not just the training set).
-    """
-    print_verbose(f"Balancing data to have at most {balance_ratio*100:.1f}% of bug>0 samples in the training set...")
-    bug_true = df[df[bug_tag] > 0]
-    n_total = len(df)
-    n_true = len(bug_true)
-    ratio = n_true / n_total if n_total > 0 else 0
-    print_verbose(f"Initial data: {n_total} samples ({n_true} bug>0, {n_total - n_true} bug=0, ratio={ratio:.2f})")
-    if n_true > 0 and ratio <= balance_ratio:
-        while True:
-            n_true = len(df[df[bug_tag] > 0])
-            n_total = len(df)
-            ratio = n_true / n_total
-            if ratio > balance_ratio:
-                break
-            n_to_add = min(n_true, int(n_total * balance_ratio) - n_true)
-            n_to_add = max(1, n_to_add)
-            bug_true_upsampled = bug_true.sample(n=n_to_add, replace=True, random_state=random_seed)
-            df = pandas.concat([df, bug_true_upsampled], ignore_index=True)
-        print_verbose(f"Data balanced: {n_total} samples ({n_true} bug>0, {n_total - n_true} bug=0, ratio={ratio:.2f})")
-    else:
-        print_verbose(f"Data already balanced")
-    return df
-
-
-def split_data(df, train_len):
-    print_verbose(f"Splitting data into {train_len*100:.1f}% train and {(1-train_len)*100:.1f}% validation sets...")
-    rng = np.random.default_rng()
-    random_seed = rng.integers(0, 2**32 - 1)
-    train_df = df.sample(frac=train_len, random_state=random_seed)
-    validation_df = df.drop(train_df.index)
-    print_verbose(f"train data count: {len(train_df)}")
-    print_verbose(f"validation data count: {len(validation_df)}")
-    return train_df, validation_df, random_seed
-
-
-def train_model(train_df, random_seed, name_tag, bug_tag, use_boolean_model):
-    print_verbose("Training model...")
-    feature_columns = [col for col in train_df.columns if col not in [name_tag, bug_tag]]
-    X_train = train_df[feature_columns]
-    y_train = train_df[bug_tag].astype(bool) if use_boolean_model else train_df[bug_tag]
-    clf = RandomForestClassifier(random_state=random_seed)
-    clf.fit(X_train, y_train)
-    return clf, feature_columns
-
-
-def evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset):
-    print_verbose("Evaluating model...")
-    print_verbose("-----")
-    print_verbose(f"Results for dataset '{dataset}':")
-    X_val = validation_df[feature_columns]
-    y_val = validation_df[bug_tag].astype(bool)
-    y_pred = clf.predict(X_val).astype(bool)
-    acc = accuracy_score(y_val, y_pred)
-    prec = precision_score(y_val, y_pred, zero_division=0, average=None)
-    rec = recall_score(y_val, y_pred, zero_division=0, average=None)
-    f1 = f1_score(y_val, y_pred, zero_division=0, average=None)
-    cm = confusion_matrix(y_val, y_pred)
-    print_verbose(f"Validation accuracy: {acc:.4f}")
-    print_verbose(f"Validation precision (False, True): {prec}")
-    print_verbose(f"Validation recall (False, True): {rec}")
-    print_verbose(f"Validation F1-score (False, True): {f1}")
-    print_verbose("Confusion matrix:")
-    print_verbose(cm)
-    print_verbose("Classification report:")
-    print_verbose(classification_report(y_val, y_pred, zero_division=0))
-
-    auc = None
-
-    # Calculate AUC if possible
-    try:
-        if hasattr(clf, "predict_proba"):
-            y_proba = clf.predict_proba(validation_df[feature_columns])[:, 1]
-            auc = roc_auc_score(validation_df[bug_tag].astype(bool), y_proba)
-            print_verbose(f"Validation AUC: {auc:.4f}")
-        else:
-            print("AUC cannot be calculated: classifier does not support predict_proba.")
-    except Exception as e:
-        print(f"Error calculating AUC: {e}")
-
-    return acc, prec, rec, f1, cm, auc
-
-
-def normalize_data(df, name_tag, bug_tag):
-    print_verbose("Normalizing data...")
-    feature_columns = [col for col in df.columns if col not in [name_tag, bug_tag]]
-    scaler = StandardScaler()
-    df[feature_columns] = scaler.fit_transform(df[feature_columns])
-    return df
-
-
-def extract_features(df, name_tag, bug_tag, features_number):
-    print_verbose("Extracting features...")
-    if not features_number:
-        return df
-
-    feature_columns = [col for col in df.columns if col not in [name_tag, bug_tag]]
-    x_features = df[feature_columns]
-    pca = PCA(n_components=min(len(feature_columns), features_number))
-    principal_components = pca.fit_transform(x_features)
-    pc_columns = [f'PC{i+1}' for i in range(principal_components.shape[1])]
-    df_pc = pandas.DataFrame(data=principal_components, columns=pc_columns)
-    df = pandas.concat([df[[name_tag, bug_tag]].reset_index(drop=True), df_pc.reset_index(drop=True)], axis=1)
-
-    return df
 
 
 def main():
