@@ -1,3 +1,4 @@
+import atexit
 import csv
 import pathlib
 
@@ -13,6 +14,7 @@ class CsvWriter:
         self._writer = csv.DictWriter(self._file, fieldnames=self._field_names)
         self._writer.writeheader()
         self._is_open = True
+        atexit.register(self.close)
 
     def write(self, data):
         if set(data.keys()) != set(self._field_names):
@@ -32,9 +34,9 @@ class CsvRowData:
     _input_format = [
         'rep_id',
         'test_id',
+        'run_number',
         'test_name',
         'dataset',
-        'run_number',
         'number_of_features',
         'accuracy',
         'precision',
@@ -47,9 +49,9 @@ class CsvRowData:
     _conversion = {
         'rep_id': lambda x: x['rep_id'],
         'test_id': lambda x: x['test_id'],
+        'run_number': lambda x: int(x['run_number']),
         'test_name': lambda x: x['test_name'],
         'dataset': lambda x: x['dataset'],
-        'run_number': lambda x: int(x['run_number']),
         'accuracy': lambda x: x['accuracy'],
         'precision_true': lambda x: float(x['precision'][1]),
         'precision_false': lambda x: float(x['precision'][0]),

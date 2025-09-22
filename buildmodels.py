@@ -14,45 +14,156 @@ import config as cfg
 from log import print_verbose
 
 
-def load_data(data_path):
-    def get_db_from_file(full_path):
-        print_verbose(f"Reading data from: {full_path}")
-        csv_file_metrics = m.FileMetrics(full_path)
+class Runner():
+    _random_seed = None
+    _data = None
+    _number_of_tests = None
+    _writer = None
 
-        df = pandas.read_csv(full_path)
-        return df, csv_file_metrics
+    def __init__(self):
+        raise ValueError("Not instantiable")
 
-    data = {}
-    if os.path.isdir(data_path):
-        print_verbose(f"{data_path} is a directory. Reading all CSV files inside...")
-        dir = data_path
-        files = [f for f in os.listdir(dir) if f.endswith('.csv')]
-        for file in files:
-            full_path = os.path.join(dir, file)
-            df, csv_file_metrics = get_db_from_file(full_path)
+    @classmethod
+    def random_seed(cls):
+        if cls._random_seed is None:
+            rng = np.random.default_rng()
+            cls._random_seed = rng.integers(0, 2**32 - 1)
+        return cls._random_seed
+
+    @classmethod
+    def data(cls):
+        if cls._data is None:
+            cls._data = cls.__load_data()
+        return cls._data
+
+    @classmethod
+    def number_of_tests(cls):
+        if cls._number_of_tests is None:
+            cls._number_of_tests = len(cfg.presets) * len(cls.data())
+        return cls._number_of_tests
+
+    @classmethod
+    def writer(cls):
+        if cls._writer is None:
+            cls._writer = cw.CsvWriter('log/results.csv')
+        return cls._writer
+
+    @classmethod
+    def iter_tests(cls):
+        for n, preset in enumerate(cfg.presets):
+            test_id = n * 1000
+            for dataset, (df, tags, name_tag, bug_tag) in cls.__get_filtered_data(preset).items():
+                test_id += 1
+                yield Test(test_id, dataset, df, tags, name_tag, bug_tag, preset)
+
+    @classmethod
+    def __get_filtered_data(cls, preset):
+        filtered_data = {}
+        for dataset, (df, csv_file_metrics) in cls.data().items():
+            tags = csv_file_metrics.filter_tags(preset.metrics)
+            name_tag = csv_file_metrics.get_name_tag()
+            bug_tag = csv_file_metrics.get_bug_tag()
+            if name_tag is None or bug_tag is None:
+                raise ValueError(f"A name or bug column is missing in the dataset '{dataset}'.")
+            if not tags:
+                raise ValueError(f"No valid metrics found in the dataset '{dataset}' for the given preset metrics.")
+
+            filtered_df = df[tags].copy()
+            filtered_data[dataset] = (filtered_df, tags, name_tag, bug_tag)
+        return filtered_data
+
+    @classmethod
+    def __load_data(cls):
+        def get_db_from_file(full_path):
+            print_verbose(f"Reading data from: {full_path}")
+            csv_file_metrics = m.FileMetrics(full_path)
+
+            df = pandas.read_csv(full_path)
+            return df, csv_file_metrics
+
+        data = {}
+        data_path = cfg.data_path
+        if os.path.isdir(data_path):
+            print_verbose(f"{data_path} is a directory. Reading all CSV files inside...")
+            dir = data_path
+            files = [f for f in os.listdir(dir) if f.endswith('.csv')]
+            for file in files:
+                full_path = os.path.join(dir, file)
+                df, csv_file_metrics = get_db_from_file(full_path)
+                data[file] = (df, csv_file_metrics)
+        else:
+            file = os.path.basename(data_path)
+            df, csv_file_metrics = get_db_from_file(data_path)
             data[file] = (df, csv_file_metrics)
-    else:
-        file = os.path.basename(data_path)
-        df, csv_file_metrics = get_db_from_file(data_path)
-        data[file] = (df, csv_file_metrics)
-    print_verbose(f"Found {len(data)} dataset(s).")
-    return data
+        print_verbose(f"Found {len(data)} dataset(s).")
+        return data
 
 
-def filter_metrics(data, metrics):
-    filtered_data = {}
-    for dataset, (df, csv_file_metrics) in data.items():
-        tags = csv_file_metrics.filter_tags(metrics)
-        name_tag = csv_file_metrics.get_name_tag()
-        bug_tag = csv_file_metrics.get_bug_tag()
-        if name_tag is None or bug_tag is None:
-            raise ValueError(f"A name or bug column is missing in the dataset '{dataset}'.")
-        if not tags:
-            raise ValueError(f"No valid metrics found in the dataset '{dataset}' for the given preset metrics.")
+class Test():
+    __count = 0
 
-        filtered_df = df[tags].copy()
-        filtered_data[dataset] = (filtered_df, tags, name_tag, bug_tag)
-    return filtered_data
+    def __init__(self, id, dataset, df, tags, name_tag, bug_tag, preset):
+        self._id = id
+        self._dataset = dataset
+        self._df = df
+        self._tags = tags
+        self._name_tag = name_tag
+        self._bug_tag = bug_tag
+        self._preset = preset
+        self._test_count = self.count()
+
+    @classmethod
+    def count(cls):
+        cls.__count += 1
+        return cls.__count
+
+    def __iter__(self):
+        print(f"\r({self.__count}/{Runner.number_of_tests()})")
+        for run_number in range(0, cfg.repetitions):
+            rep_id = 1000 * self._id + run_number
+            #print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
+            yield Model(rep_id, self._dataset, self._df, self._tags, self._name_tag, self._bug_tag, self._preset)
+            #print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
+
+
+class Model():
+    def __init__(self, rep_id, dataset, df, tags, name_tag, bug_tag, preset):
+        self._rep_id = rep_id
+        self._dataset = dataset
+        self._df = df
+        self._tags = tags
+        self._name_tag = name_tag
+        self._bug_tag = bug_tag
+        self._test_id = rep_id // 1000
+        self._run_number = rep_id % 1000
+        self._preset = preset
+        self._data = []
+
+    def run(self):
+        df = normalize_data(self._df, self._name_tag, self._bug_tag)
+        df = extract_features(df, self._name_tag, self._bug_tag, self._preset.pca_features)
+        train_df, validation_df, random_seed = split_data(df, self._preset.train_len)
+        train_df = balance_data(train_df, self._bug_tag, self._preset.balance_ratio, random_seed)
+        clf, feature_columns = train_model(train_df, random_seed, self._name_tag, self._bug_tag, self._preset.use_boolean_model)
+        acc, prec, rec, f1, cm, auc = evaluate_model(clf, feature_columns, validation_df, self._bug_tag, self._dataset)
+        
+        self._data = [
+            self._rep_id,
+            self._test_id,
+            self._run_number,
+            self._preset.name,
+            self._dataset,
+            len(feature_columns),
+            acc,
+            prec,
+            rec,
+            f1,
+            cm,
+            auc
+        ]
+
+    def save_results(self):
+        cw.save_results_to_csv(Runner.writer(), *self._data)
 
 
 def print_data_stats(df, tags, bug_tag):
@@ -173,57 +284,23 @@ def extract_features(df, name_tag, bug_tag, features_number):
     return df
 
 
-def generate_random_seed():
-    rng = np.random.default_rng()
-    return rng.integers(0, 2**32 - 1)
-
-
 def main():
-    random_seed = generate_random_seed()
-    writer = cw.CsvWriter('log/results.csv')
-    data = load_data(cfg.data_path)
-
-    number_of_tests = len(cfg.presets) * len(data)
-    test_id = 0
-
     try:
-        for preset in cfg.presets:
-            print("\r============================================")
-            print(f"Using configuration: {preset.name} - {preset.description}")
-        
-            filtered_data = filter_metrics(data, preset.metrics)
+        for test in Runner.iter_tests():
+            for model in test:
+                model.run()
+                model.save_results()
 
-            for dataset, (df, tags, name_tag, bug_tag) in filtered_data.items():
-                test_id += 1
-                rep_id = 1000 * test_id
-                print(f"\rRunning test {test_id} of {number_of_tests}...")
-                for run_number in range(0, cfg.repetitions):
-                    rep_id += 1
-                    print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
-                    print_verbose(f"Processing dataset: {dataset}")
-                    print_data_stats(df, tags, bug_tag)
-                    df = normalize_data(df, name_tag, bug_tag)
-                    df = extract_features(df, name_tag, bug_tag, preset.pca_features)
-                    train_df, validation_df, random_seed = split_data(df, preset.train_len)
-                    train_df = balance_data(train_df, bug_tag, preset.balance_ratio, random_seed)
-                    clf, feature_columns = train_model(train_df, random_seed, name_tag, bug_tag, preset.use_boolean_model)
-                    acc, prec, rec, f1, cm, auc = evaluate_model(clf, feature_columns, validation_df, bug_tag, dataset)
-                    cw.save_results_to_csv(writer, rep_id, test_id, preset.name, dataset, run_number, len(feature_columns), acc, prec, rec, f1, cm, auc)
-
-                print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
         print("\nAll tests completed.")
 
     # Ctrl C
     except KeyboardInterrupt:
         print("\nProcess interrupted by user.")
-        print(f"Ran {test_id} of {number_of_tests} tests.")
-
     #except Exception:
     #    print(f"\nAn error occurred: {traceback.format_exc()}")
     #    print(f"Ran {test_id} of {number_of_tests} tests.")
-
     finally:
-        writer.close()
+        Runner.writer().close()
 
 if __name__ == "__main__":
     main()
