@@ -5,7 +5,7 @@ import pandas
 import sklearn
 
 import metrics as m
-import csvwriter as cw
+import csvhandler as ch
 import config as cfg
 from log import print_verbose, print_not_verbose
 
@@ -28,7 +28,6 @@ class Runner():
         if cls._number_of_tests is None:
             cls._number_of_tests = len(cfg.presets) * len(cls.data())
         return cls._number_of_tests
-
 
     @classmethod
     def iter_tests(cls):
@@ -83,7 +82,7 @@ class Runner():
 
 class Test():
     _writer = None
-    __count = 0
+    _count = 0
 
     def __init__(self, id, dataset, df, tags, name_tag, bug_tag, preset):
         self._id = id
@@ -94,42 +93,54 @@ class Test():
         self._bug_tag = bug_tag
         self._preset = preset
         self._test_count = self.count()
-        self._data = [
-            self._id,
-            self._dataset,
-            self._preset.balance_ratio,
-            self._preset.use_boolean_model
-        ]
+        self._models = []
 
     @classmethod
     def count(cls):
-        cls.__count += 1
-        return cls.__count
+        cls._count += 1
+        return cls._count
 
     def __iter__(self):
-        print(f"{'\r'*(not cfg.verbose)}Running test {self.__count} of {Runner.number_of_tests()}... ({int(self.__count / Runner.number_of_tests() * 100)}%)")
+        print(f"{'\r'*(not cfg.verbose)}Running test {self._count} of {Runner.number_of_tests()}... ({int(self._count / Runner.number_of_tests() * 100)}%)")
         for run_number in range(0, cfg.repetitions):
-            rep_id = 1000 * self._id + run_number
+            rep_id = 1000 * self._id + run_number + 1
             print_not_verbose(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
-            yield Model(rep_id, self._dataset, self._df, self._tags, self._name_tag, self._bug_tag, self._preset)
+            model = Model(rep_id, self._df, self._tags, self._name_tag, self._bug_tag, self._preset)
+            yield model
+            self._models.append(model)
             print_not_verbose(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
 
     def save_results(self):
-        self.writer().write(self._data)
+        if len(self._models) == 0:
+            raise RuntimeError("No models were run for this test.")
+
+        model_data = [model.data for model in self._models]
+
+        data_list = [
+            self._id,
+            self._dataset,
+            self._preset._name,
+            self._preset.train_ratio,
+            self._preset.balance_ratio,
+            self._preset.use_boolean_model,
+            self._preset.pca_features,
+            len(self._df),
+            model_data
+        ]
+        self.writer().write(data_list)
 
     @classmethod
     def writer(cls):
         if cls._writer is None:
-            cls._writer = cw.TestCsvWriter()
+            cls._writer = ch.TestCsvWriter()
         return cls._writer
 
 
 class Model():
     _writer = None
 
-    def __init__(self, rep_id, dataset, df, tags, name_tag, bug_tag, preset):
+    def __init__(self, rep_id, df, tags, name_tag, bug_tag, preset):
         self._rep_id = rep_id
-        self._dataset = dataset
         self._df = df
         self._tags = tags
         self._name_tag = name_tag
@@ -137,20 +148,21 @@ class Model():
         self._test_id = rep_id // 1000
         self._run_number = rep_id % 1000
         self._preset = preset
-        self._data = []
+        self._data_list = []
+        self._data_dict = {}
 
     def run(self):
         self._df = self.__normalize_data()
         self._df = self.__extract_features()
         train_df, validation_df = self.__split_data()
         train_df = self.__balance_data(train_df)
-        clf, feature_columns = self.__train_model(train_df)
-        accuracy, precision, recall, f1, confusion_matrix, auc = self.__evaluate_model(clf, feature_columns, validation_df)
+        clf, input_columns = self.__train_model(train_df)
+        accuracy, precision, recall, f1, confusion_matrix, auc = self.__evaluate_model(clf, input_columns, validation_df)
         
-        self._data = [
+        self._data_list = [
             self._rep_id,
             self._test_id,
-            len(feature_columns),
+            len(input_columns),
             accuracy,
             precision,
             recall,
@@ -160,20 +172,24 @@ class Model():
         ]
 
     def save_results(self):
-        self.writer().write(self._data)
+        self._data_dict = self.writer().write(self._data_list)
 
     @classmethod
     def writer(cls):
         if cls._writer is None:
-            cls._writer = cw.ModelCsvWriter()
+            cls._writer = ch.ModelCsvWriter()
         return cls._writer
+
+    @property
+    def data(self):
+        return self._data_dict
 
     def __normalize_data(self):
         print_verbose("Normalizing data...")
-        feature_columns = [col for col in self._df.columns if col not in [self._name_tag, self._bug_tag]]
+        input_columns = [col for col in self._df.columns if col not in [self._name_tag, self._bug_tag]]
         scaler = sklearn.preprocessing.StandardScaler()
         df = self._df.copy()
-        df[feature_columns] = scaler.fit_transform(df[feature_columns])
+        df[input_columns] = scaler.fit_transform(df[input_columns])
         return df
 
     def __extract_features(self):
@@ -192,9 +208,9 @@ class Model():
         return df
 
     def __split_data(self):
-        train_len = self._preset.train_len
-        print_verbose(f"Splitting data into {train_len*100:.1f}% train and {(1-train_len)*100:.1f}% validation sets...")
-        train_df = self._df.sample(frac=train_len)
+        train_ratio = self._preset.train_ratio
+        print_verbose(f"Splitting data into {train_ratio*100:.1f}% train and {(1-train_ratio)*100:.1f}% validation sets...")
+        train_df = self._df.sample(frac=train_ratio)
         validation_df = self._df.drop(train_df.index)
         print_verbose(f"train data count: {len(train_df)}")
         print_verbose(f"validation data count: {len(validation_df)}")
@@ -230,18 +246,18 @@ class Model():
     
     def __train_model(self, train_df):
         print_verbose("Training model...")
-        feature_columns = [col for col in train_df.columns if col not in [self._name_tag, self._bug_tag]]
-        X_train = train_df[feature_columns]
+        input_columns = [col for col in train_df.columns if col not in [self._name_tag, self._bug_tag]]
+        X_train = train_df[input_columns]
         y_train = train_df[self._bug_tag].astype(bool) if self._preset._use_boolean_model else train_df[self._bug_tag]
         clf = sklearn.ensemble.RandomForestClassifier()
         clf.fit(X_train, y_train)
-        return clf, feature_columns
+        return clf, input_columns
 
-    def __evaluate_model(self, clf, feature_columns, validation_df):
+    def __evaluate_model(self, clf, input_columns, validation_df):
         print_verbose("Evaluating model...")
         print_verbose("-----")
-        print_verbose(f"Results for dataset '{self._dataset}':")
-        X_val = validation_df[feature_columns]
+        print_verbose(f"Results for model ID '{self._rep_id}':")
+        X_val = validation_df[input_columns]
         y_val = validation_df[self._bug_tag].astype(bool)
         y_pred = clf.predict(X_val).astype(bool)
         accuracy = sklearn.metrics.accuracy_score(y_val, y_pred)
@@ -263,7 +279,7 @@ class Model():
         # Calculate AUC if possible
         try:
             if hasattr(clf, "predict_proba"):
-                y_proba = clf.predict_proba(validation_df[feature_columns])[:, 1]
+                y_proba = clf.predict_proba(validation_df[input_columns])[:, 1]
                 auc = sklearn.metrics.roc_auc_score(validation_df[self._bug_tag].astype(bool), y_proba)
                 print_verbose(f"Validation AUC: {auc:.4f}")
             else:
