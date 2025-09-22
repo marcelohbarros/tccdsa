@@ -11,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 import metrics as m
 import csvwriter as cw
 import config as cfg
-from log import print_verbose
+from log import print_verbose, print_not_verbose
 
 
 class Runner():
@@ -118,12 +118,12 @@ class Test():
         return cls.__count
 
     def __iter__(self):
-        print(f"\r({self.__count}/{Runner.number_of_tests()})")
+        print(f"{'\r'*cfg.verbose}Running test {self.__count} of {Runner.number_of_tests()}... ({int(self.__count / Runner.number_of_tests() * 100)}%)")
         for run_number in range(0, cfg.repetitions):
             rep_id = 1000 * self._id + run_number
-            #print(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
+            print_not_verbose(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
             yield Model(rep_id, self._dataset, self._df, self._tags, self._name_tag, self._bug_tag, self._preset)
-            #print(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
+            print_not_verbose(f"\r{' ' * (cfg.repetitions + 2)}", end='')  # Clear progress bar line
 
 
 class Model():
