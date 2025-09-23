@@ -283,7 +283,7 @@ class Model():
                 auc = sklearn.metrics.roc_auc_score(validation_df[self._bug_tag].astype(bool), y_proba)
                 import matplotlib.pyplot as plt
 
-                fpr, tpr, thresholds = sklearn.metrics.roc_curve(validation_df[self._bug_tag].astype(bool), y_proba)
+                fpr, tpr, _ = sklearn.metrics.roc_curve(validation_df[self._bug_tag].astype(bool), y_proba)
                 plt.figure()
                 plt.plot(fpr, tpr, label=f'AUC = {auc:.4f}')
                 plt.plot([0, 1], [0, 1], 'k--')
@@ -291,7 +291,7 @@ class Model():
                 plt.ylabel('True Positive Rate')
                 plt.title('ROC Curve')
                 plt.legend(loc='lower right')
-                plt.savefig(f'log/roc_curve_{self._rep_id}.png')
+                plt.savefig(f'log/img/roc_curve_{self._rep_id}.png')
                 plt.close()
                 print_verbose(f"Validation AUC: {auc:.4f}")
             else:

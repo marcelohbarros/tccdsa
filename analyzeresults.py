@@ -1,8 +1,20 @@
 import statistics
-
 import pandas
-
+import logging
 import csvhandler as ch
+
+
+logging.basicConfig(
+    filename='log/analyzeresults.log',
+    level=logging.INFO,
+    format='%(message)s',
+    filemode='w'  # Overwrite the previous log
+)
+
+
+def log_info(message):
+    print(message)
+    logging.info(message)
 
 
 def resume_variable_info(test_df, description, variable, filter_column=None, filter_value=None):
@@ -24,43 +36,43 @@ def print_report(test_df, model_df):
     test_size = len(test_df)
     presets = test_df['preset_name'].unique()
     datasets = test_df['dataset'].unique()
-    print("==========================")
-    print(f"Number of tests: {test_size}")
-    print(f"Number of models: {len(model_df)}")
-    print(f"Found {len(presets)} presets in the run: {', '.join(presets)}")
-    print(f"Found {len(datasets)} datasets in the run: {', '.join(datasets)}")
-    print("==========================")
-    print("General results\t\tmin\tmedian\tmax")
-    print(resume_variable_info(test_df, "Accuracy:\t", "accuracy"))
-    print(resume_variable_info(test_df, "Precision true:\t", "precision_true"))
-    print(resume_variable_info(test_df, "Precision false:", "precision_false"))
-    print(resume_variable_info(test_df, "Recall true:\t", "recall_true"))
-    print(resume_variable_info(test_df, "Recall false:\t", "recall_false"))
-    #print(resume_variable_info(test_df, "F1 true", "f1_true"))
-    #print(resume_variable_info(test_df, "F1 false", "f1_false"))
-    print(resume_variable_info(test_df, "AUC:\t\t", "auc"))
+    log_info("==========================")
+    log_info(f"Number of tests: {test_size}")
+    log_info(f"Number of models: {len(model_df)}")
+    log_info(f"Found {len(presets)} presets in the run: {', '.join(presets)}")
+    log_info(f"Found {len(datasets)} datasets in the run: {', '.join(datasets)}")
+    log_info("==========================")
+    log_info("General results\t\tmin\tmedian\tmax")
+    log_info(resume_variable_info(test_df, "Accuracy:\t", "accuracy"))
+    log_info(resume_variable_info(test_df, "Precision true:\t", "precision_true"))
+    log_info(resume_variable_info(test_df, "Precision false:", "precision_false"))
+    log_info(resume_variable_info(test_df, "Recall true:\t", "recall_true"))
+    log_info(resume_variable_info(test_df, "Recall false:\t", "recall_false"))
+    #log_info(resume_variable_info(test_df, "F1 true", "f1_true"))
+    #log_info(resume_variable_info(test_df, "F1 false", "f1_false"))
+    log_info(resume_variable_info(test_df, "AUC:\t\t", "auc"))
 
-    print("==========================")
-    print("Presets:")
+    log_info("==========================")
+    log_info("Presets:")
     for preset in presets:
-        print("--------------------------")
-        print(f"'{preset}'")
-        print("\t\tmin\tmedian\tmax")
-        print(resume_variable_info(test_df, "Accuracy:", "accuracy", "preset_name", preset))
-        print(resume_variable_info(test_df, "Recall true:", "recall_true", "preset_name", preset))
-        print(resume_variable_info(test_df, "Recall false:", "recall_false", "preset_name", preset))
-        print(resume_variable_info(test_df, "AUC:\t", "auc", "preset_name", preset))
+        log_info("--------------------------")
+        log_info(f"'{preset}'")
+        log_info("\t\tmin\tmedian\tmax")
+        log_info(resume_variable_info(test_df, "Accuracy:", "accuracy", "preset_name", preset))
+        log_info(resume_variable_info(test_df, "Recall true:", "recall_true", "preset_name", preset))
+        log_info(resume_variable_info(test_df, "Recall false:", "recall_false", "preset_name", preset))
+        log_info(resume_variable_info(test_df, "AUC:\t", "auc", "preset_name", preset))
 
-    print("==========================")
-    print("Datasets:")
+    log_info("==========================")
+    log_info("Datasets:")
     for dataset in datasets:
-        print("--------------------------")
-        print(f"'{dataset}'")
-        print("\t\tmin\tmedian\tmax")
-        print(resume_variable_info(test_df, "Accuracy:", "accuracy", "dataset", dataset))
-        print(resume_variable_info(test_df, "Recall true:", "recall_true", "dataset", dataset))
-        print(resume_variable_info(test_df, "Recall false:", "recall_false", "dataset", dataset))
-        print(resume_variable_info(test_df, "AUC:\t", "auc", "dataset", dataset))
+        log_info("--------------------------")
+        log_info(f"'{dataset}'")
+        log_info("\t\tmin\tmedian\tmax")
+        log_info(resume_variable_info(test_df, "Accuracy:", "accuracy", "dataset", dataset))
+        log_info(resume_variable_info(test_df, "Recall true:", "recall_true", "dataset", dataset))
+        log_info(resume_variable_info(test_df, "Recall false:", "recall_false", "dataset", dataset))
+        log_info(resume_variable_info(test_df, "AUC:\t", "auc", "dataset", dataset))
 
 
 def main():
