@@ -8,6 +8,10 @@ import metrics as m
 import csvhandler as ch
 import config as cfg
 from log import print_verbose, print_not_verbose
+import time
+
+
+global_init_time = time.time()
 
 
 class Runner():
@@ -94,6 +98,7 @@ class Test():
         self._preset = preset
         self._test_count = self.count()
         self._models = []
+        self._init_time = time.time()
 
     @classmethod
     def count(cls):
@@ -101,7 +106,11 @@ class Test():
         return cls._count
 
     def __iter__(self):
-        print(f"{'\r'*(not cfg.verbose)}Running test {self._count} of {Runner.number_of_tests()}... ({int(self._count / Runner.number_of_tests() * 100)}%)")
+        time_elapsed = time.time() - global_init_time
+        hours, rem = divmod(int(time_elapsed), 3600)
+        minutes, seconds = divmod(rem, 60)
+        formatted_time = f"{hours:02}:{minutes:02}:{seconds:02}"
+        print(f"{'\r'*(not cfg.verbose)}Running test {self._count} of {Runner.number_of_tests()}... ({int(self._count / Runner.number_of_tests() * 100)}% - {formatted_time})")
         for run_number in range(0, cfg.repetitions):
             rep_id = 1000 * self._id + run_number + 1
             print_not_verbose(f'\r[{"*" * run_number}{" " * (cfg.repetitions - run_number)}]', end='')
@@ -120,10 +129,15 @@ class Test():
             self._id,
             self._dataset,
             self._preset._name,
+            time.time() - self._init_time,
             self._preset.train_ratio,
             self._preset.balance_ratio,
             self._preset.use_boolean_model,
             self._preset.pca_features,
+            self._preset.estimators,
+            self._preset.criterion,
+            self._preset.max_features,
+            self._preset.bootstrap,
             len(self._df),
             model_data
         ]
@@ -150,6 +164,7 @@ class Model():
         self._preset = preset
         self._data_list = []
         self._data_dict = {}
+        self._init_time = time.time()
 
     def run(self):
         self._df = self.__normalize_data()
@@ -163,6 +178,7 @@ class Model():
             self._rep_id,
             self._test_id,
             len(input_columns),
+            time.time() - self._init_time,
             accuracy,
             precision,
             recall,
@@ -173,6 +189,9 @@ class Model():
 
     def save_results(self):
         self._data_dict = self.writer().write(self._data_list)
+
+    def clean(self):
+        del self._df
 
     @classmethod
     def writer(cls):
@@ -208,10 +227,24 @@ class Model():
         return df
 
     def __split_data(self):
+        # Check if the df has at least one row with bug=0 and one row with bug>0
+        def is_valid_df(df):
+            return any(df[self._bug_tag] == 0) and any(df[self._bug_tag] > 0)
+        
         train_ratio = self._preset.train_ratio
-        print_verbose(f"Splitting data into {train_ratio*100:.1f}% train and {(1-train_ratio)*100:.1f}% validation sets...")
+        print_verbose(f"Splitting data into {train_ratio*100:.1f}% train and {(1-train_ratio)*100:.1f}% validation sets...")    
         train_df = self._df.sample(frac=train_ratio)
         validation_df = self._df.drop(train_df.index)
+        if len(train_df) == 0 or len(validation_df) == 0:
+            raise ValueError("Training or validation set is empty after split. Adjust the train_ratio or check the dataset")
+        if not is_valid_df(train_df) or not is_valid_df(validation_df):
+            success = False
+            tries = 0
+            while not success and tries < 100:
+                tries += 1
+                train_df = self._df.sample(frac=train_ratio)
+                validation_df = self._df.drop(train_df.index)
+                success = is_valid_df(train_df) and is_valid_df(validation_df)
         print_verbose(f"train data count: {len(train_df)}")
         print_verbose(f"validation data count: {len(validation_df)}")
         return train_df, validation_df
@@ -249,7 +282,10 @@ class Model():
         input_columns = [col for col in train_df.columns if col not in [self._name_tag, self._bug_tag]]
         X_train = train_df[input_columns]
         y_train = train_df[self._bug_tag].astype(bool) if self._preset._use_boolean_model else train_df[self._bug_tag]
-        clf = sklearn.ensemble.RandomForestClassifier()
+        clf = sklearn.ensemble.RandomForestClassifier(n_estimators=self._preset._estimators,
+                                                      criterion=self._preset._criterion,
+                                                      max_features=self._preset._max_features,
+                                                      bootstrap=self._preset._bootstrap)
         clf.fit(X_train, y_train)
         return clf, input_columns
 
@@ -317,6 +353,7 @@ def main():
             for model in test:
                 model.run()
                 model.save_results()
+                model.clean()
             test.save_results()
 
         print("\nAll tests completed.")

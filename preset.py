@@ -7,21 +7,36 @@ class Default:
     BALANCE_RATIO = 0.5
     USE_BOOLEAN_MODEL = False
     PCA_FEATURES = None
-
+    ESTIMATORS = 100
+    CRITERION = 'gini'
+    MAX_FEATURES = 'sqrt'
+    BOOTSTRAP = True
 
 class PreSet(utils.HashableElement):
+    _id_counter = 1
     all_presets = None
 
     def __init__(self, name, description, metrics=Default.METRICS, train_ratio=Default.TRAIN_RATIO,
                  balance_ratio=Default.BALANCE_RATIO, use_boolean_model=Default.USE_BOOLEAN_MODEL,
-                 pca_features=Default.PCA_FEATURES):
+                 pca_features=Default.PCA_FEATURES, estimators=Default.ESTIMATORS,
+                 criterion=Default.CRITERION, max_features=Default.MAX_FEATURES, bootstrap=Default.BOOTSTRAP):
         super().__init__(name, description)
+        self._id = PreSet._id_counter
+        PreSet._id_counter += 1
         self._metric_tags = metrics if metrics is not None else []
         self._metrics = PreSetMetrics(self._metric_tags)
         self._train_ratio = train_ratio
         self._balance_ratio = balance_ratio
         self._use_boolean_model = use_boolean_model
         self._pca_features = pca_features
+        self._estimators = estimators
+        self._criterion = criterion
+        self._max_features = max_features
+        self._bootstrap = bootstrap
+
+    @property
+    def id(self):
+        return self._id
 
     @property
     def metrics(self):
@@ -43,8 +58,27 @@ class PreSet(utils.HashableElement):
     def pca_features(self):
         return self._pca_features
 
+    @property
+    def estimators(self):
+        return self._estimators
+
+    @property
+    def criterion(self):
+        return self._criterion
+
+    @property
+    def max_features(self):
+        return self._max_features
+
+    @property
+    def bootstrap(self):
+        return self._bootstrap
+
     def __repr__(self):
-        return f"PreSet(name=\"{self._name}\", description=\"{self._description}\", metrics={self._metric_tags}, train_ratio={self._train_ratio}, balance_ratio={self._balance_ratio}, use_boolean_model={self._use_boolean_model}, pca_features={self._pca_features})"
+        return (f"PreSet(id={self._id}, name=\"{self._name}\", description=\"{self._description}\", metrics={self._metric_tags}, "
+                f"train_ratio={self._train_ratio}, balance_ratio={self._balance_ratio}, use_boolean_model={self._use_boolean_model}, "
+                f"pca_features={self._pca_features}, estimators={self._estimators}, criterion={self._criterion}, "
+                f"max_features={self._max_features}, bootstrap={self._bootstrap})")
 
 
 class PreSetMetrics:
@@ -68,30 +102,36 @@ class PreSetMetrics:
         return self._required_columns
 
 
-DEFAULT = PreSet("default", "Default settings")
-BALANCE_10 = PreSet("balance_01", "Balance ratio 0.1", balance_ratio=0.1)
-BALANCE_20 = PreSet("balance_02", "Balance ratio 0.2", balance_ratio=0.2)
-BALANCE_30 = PreSet("balance_03", "Balance ratio 0.3", balance_ratio=0.3)
-BALANCE_40 = PreSet("balance_04", "Balance ratio 0.4", balance_ratio=0.4)
-TRAIN_50 = PreSet("train_05", "Training size 50%", train_ratio=0.5)
-TRAIN_60 = PreSet("train_06", "Training size 60%", train_ratio=0.6)
-TRAIN_80 = PreSet("train_08", "Training size 80%", train_ratio=0.8)
-PCA_5 = PreSet("pca_05", "PCA with 5 features", pca_features=5)
-PCA_10 = PreSet("pca_10", "PCA with 10 features", pca_features=10)
-PCA_15 = PreSet("pca_15", "PCA with 15 features", pca_features=15)
-PCA_20 = PreSet("pca_20", "PCA with 20 features", pca_features=20)
-PCA_25 = PreSet("pca_25", "PCA with 25 features", pca_features=25)
+pca_features_values = [None, 25]
+boolean_model_values = [False, True]
+estimator_values = [10, 50, 100, 500]
+criterion_values = ['gini', 'entropy']
+max_features_values = ['sqrt', None]
+bootstrap_values = [True, False]
 
-DEFAULT_BOOLEAN = PreSet("boolean", "Use boolean model", use_boolean_model=True)
-BALANCE_10_BOOLEAN = PreSet("balance_01_boolean", "Balance ratio 0.1 with boolean model", balance_ratio=0.1, use_boolean_model=True)
-BALANCE_20_BOOLEAN = PreSet("balance_02_boolean", "Balance ratio 0.2 with boolean model", balance_ratio=0.2, use_boolean_model=True)
-BALANCE_30_BOOLEAN = PreSet("balance_03_boolean", "Balance ratio 0.3 with boolean model", balance_ratio=0.3, use_boolean_model=True)
-BALANCE_40_BOOLEAN = PreSet("balance_04_boolean", "Balance ratio 0.4 with boolean model", balance_ratio=0.4, use_boolean_model=True)
-TRAIN_50_BOOLEAN = PreSet("train_05_boolean", "Training size 50% with boolean model", train_ratio=0.5, use_boolean_model=True)
-TRAIN_60_BOOLEAN = PreSet("train_06_boolean", "Training size 60% with boolean model", train_ratio=0.6, use_boolean_model=True)
-TRAIN_80_BOOLEAN = PreSet("train_08_boolean", "Training size 80% with boolean model", train_ratio=0.8, use_boolean_model=True)
-PCA_5_BOOLEAN = PreSet("pca_05_boolean", "PCA with 5 features and boolean model", pca_features=5, use_boolean_model=True)
-PCA_10_BOOLEAN = PreSet("pca_10_boolean", "PCA with 10 features and boolean model", pca_features=10, use_boolean_model=True)
-PCA_15_BOOLEAN = PreSet("pca_15_boolean", "PCA with 15 features and boolean model", pca_features=15, use_boolean_model=True)
-PCA_20_BOOLEAN = PreSet("pca_20_boolean", "PCA with 20 features and boolean model", pca_features=20, use_boolean_model=True)
-PCA_25_BOOLEAN = PreSet("pca_25_boolean", "PCA with 25 features and boolean model", pca_features=25, use_boolean_model=True)
+# Generate all combinations of presets
+def generate_all_presets():
+    presets = [PreSet("default", "Default")]
+    for pca_features in pca_features_values:
+        for use_boolean_model in boolean_model_values:
+            for estimators in estimator_values:
+                for criterion in criterion_values:
+                    for max_features in max_features_values:
+                        for bootstrap in bootstrap_values:
+                            pca_features_str = f"pca-{pca_features}_" if pca_features is not None else ""
+                            boolean_model_str = f"booleanModel_" if use_boolean_model else ""
+                            bootstrap_str = "_bootstrap" if bootstrap else ""
+                            name = (f"{pca_features_str}{boolean_model_str}"
+                                    f"est-{estimators}_crit-{criterion}_maxf-{max_features}{bootstrap_str}")
+                            description = (f"PCA: {pca_features}, Boolean Model: {use_boolean_model}, "
+                                           f"Estimators: {estimators}, Criterion: {criterion}, "
+                                           f"Max Features: {max_features}, Bootstrap: {bootstrap}")
+                            preset = PreSet(name, description, pca_features=pca_features,
+                                            use_boolean_model=use_boolean_model, estimators=estimators,
+                                            criterion=criterion, max_features=max_features, bootstrap=bootstrap)
+                            presets.append(preset)
+    print("Generated", len(presets), "presets.")
+
+    return presets
+
+generate_all_presets()

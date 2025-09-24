@@ -1,6 +1,7 @@
 log/*
 *.log
 datasets/*
+datasets_sanity_check/*
 *.pyc
 __pycache__/
 .vscode/
