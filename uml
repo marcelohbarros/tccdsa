@@ -1,0 +1,273 @@
+@startuml
+package support_modules <<rectangle>> {
+
+    package utils <<frame>> {
+        abstract class HashableElement {
+            {static} __all_elements
+            + name
+            + description
+            {static} all()
+            {static} all_names()
+            {static} from_name(name)
+            {static} from_names(names)
+            + HashableElement(name, description)
+        }
+    }
+    
+    
+    package metrics <<frame>> {
+        class Metric {
+            {static} __all_tags
+            + tags
+            {static} from_tag(tag)
+            + Metric(name, description, tags)
+        }
+        Metric -up-|> support_modules.utils.HashableElement
+        
+        class globals {
+            + NAME : Metric
+            + BUG : Metric
+            + AMC : Metric
+            ...
+            + WMC : Metric
+        }
+        
+        class MetricTag {
+            + metric : Metric
+            + tag
+            + is_valid()
+        }
+        
+        class FileMetrics {
+            - _metrics : Set[MetricTag]
+            + FileMetrics(data_path)
+            + filter_tags(filter_metrics)
+            + get_all()
+            + get_tag(metric)
+            + get_all_tags()
+        }
+        FileMetrics "1" .up.* "*" MetricTag
+        MetricTag "1" .up.* "1" Metric
+        hide globals circle
+        hide globals methods
+    }
+    package log <<frame>> {
+        class globals {
+            + print_verbose(msg)
+            + print_not_verbose(msg, end)
+        }
+        hide globals circle
+        hide globals attributes
+    }
+    
+    package config <<frame>> {
+        class globals {
+            + data_path
+            + presets : preset.PreSet
+            + repetitions
+            + verbose
+            + parse_args()
+        }
+        hide globals circle
+    }
+    
+    
+    package preset <<frame>> {
+        enum Default {
+            + METRICS = None
+            ...
+            + BOOTSTRAP = True
+        }
+        class PreSet {
+            {static} _id_counter
+            {static} all_presets
+            + id
+            + metrics
+            + train_ratio
+            + balance_ratio
+            + use_boolean_model
+            + pca_features
+            + estimators
+            + criterion
+            + max_features
+            + bootstrap
+            + PreSet(**kwargs)
+        }
+        class PreSetMetrics {
+            + metrics : Set[Metric]
+            + required_columns : Set[Metric]
+        }
+        class globals {
+            + pca_features_values
+            + boolean_model_values
+            + estimator_values
+            + criterion_values
+            + max_features_values
+            + generate_all_presets()
+        }
+        hide Default methods
+        hide PreSetMetrics methods
+        PreSet --|> support_modules.utils.HashableElement
+        PreSet ..* PreSetMetrics
+        PreSetMetrics ..> support_modules.metrics.globals
+        PreSetMetrics ..* support_modules.metrics.Metric
+        globals ..> PreSet
+        PreSet .down.> Default
+    }
+
+}
+
+package csvhandler <<frame>> {
+    abstract class CsvWriter {
+        {abstract} _row_data_class
+        - _path
+        - _file
+        - _field_names
+        - _writer : csv.DictWriter
+        - _is_open
+        + write(data_list)
+        + close()
+    }
+    CsvWriter "1" .down.* "1" CsvRowData
+    
+    class TestCsvWriter {
+        {static} _row_data_class = TestCsvRowData
+    }
+    TestCsvWriter --|> CsvWriter
+    hide TestCsvWriter methods
+    
+    class ModelCsvWriter {
+        {static} _row_data_class = ModelCsvRowData
+    }
+    ModelCsvWriter --|> CsvWriter
+    hide ModelCsvWriter methods
+    
+    abstract class CsvReader {
+        {abstract} _row_data_class
+        + df
+    }
+    CsvReader "1" .up.* "1" CsvRowData
+
+    hide CsvReader methods
+    
+    class TestCsvReader {
+        {static} _row_data_class = TestCsvRowData
+    }
+    TestCsvReader -up-|> CsvReader
+    hide TestCsvReader methods
+    
+    class ModelCsvReader {
+        {static} _row_data_class = ModelCsvRowData
+    }
+    ModelCsvReader -up-|> CsvReader
+    hide ModelCsvReader methods
+    
+    abstract class CsvRowData {
+        {abstract} _file
+        {abstract} _input_format
+        {abstract} _conversion
+        {static} get_csv_row_names()
+        + to_dict()
+    }
+    hide CsvRowData methods
+    class TestCsvRowData {
+        {static} _file = "logs/tests.csv"
+        {static} _input_format
+        {static} _conversion
+    }
+    hide TestCsvRowData methods
+    TestCsvRowData --|> CsvRowData
+    class ModelCsvRowData {
+        {static} _file = "logs/models.csv"
+        {static} _input_format
+        {static} _conversion
+    }
+    hide ModelCsvRowData methods
+    ModelCsvRowData --|> CsvRowData
+}
+
+
+package buildmodels <<frame>> #FFFFED {
+    class globals {
+        + globals_init_time
+        + main()
+    }
+    class Runner {
+        {static} data()
+        {static} number_of_tests()
+        {static} iter_tests()
+        {static} __get_filtered_data(preset)
+        {static} __load_data()
+    }
+    hide Runner attributes
+    globals -right-> Runner
+    class Test {
+        - _id
+        - _dataset
+        - _df
+        - _tags
+        - _preset
+        - _test_count
+        - _models
+        - _init_time
+        {static} count()
+        {static} writer()
+        + Test(id, dataset, df, tags, name_tag, bug_tag, preset)
+        + __iter__()
+        + save_results()
+    }
+    class Model {
+        - _writer
+        - _rep_id
+        - _df
+        - _tags
+        - _test_id
+        - _run_number
+        - _preset
+        - _init_time
+        {static} writer()
+        + Model(rep_id, df, tags, name_tag, bug_tag, preset)
+        + run()
+        + save_results()
+        + clean()
+        + data
+        - __normalize_data()
+        - __extract_features()
+        - __split_data()
+        - __balance_data(train_df)
+        - __train_model(train_df)
+        - __evaluate_model(clf, input_columns, validation_df)
+    }
+
+    Runner "1" .down.> "*" Test : yields
+    Test "1" .left.> "*" Model : yields/contains
+}
+
+
+package analyzeresults <<frame>> #FFFFED {
+    class globals {
+        +main()
+        +print_report(test_df, model_df)
+        +resume_variable_info(test_df, description, variable, filter_column, filter_value)
+        +log_info(message)
+    }
+    hide globals circle
+    hide globals attributes
+}
+
+
+support_modules.log ..> support_modules.config
+buildmodels.Model ..> support_modules.metrics.Metric
+support_modules.config "1" ..> "*" support_modules.preset.PreSet
+
+buildmodels.Test "1" .up.* "1" support_modules.preset.PreSet
+buildmodels.Model "1" .up.* "1" support_modules.preset.PreSet
+buildmodels .left.> support_modules.config
+buildmodels.Test "*" .down.* "1" csvhandler.TestCsvWriter
+buildmodels.Model "*" .down.* "1" csvhandler.ModelCsvWriter
+
+buildmodels .up.> support_modules.log
+
+analyzeresults.globals "1" .up.* "1" csvhandler.TestCsvReader
+analyzeresults.globals "1" .up.* "1" csvhandler.ModelCsvReader
+@enduml
