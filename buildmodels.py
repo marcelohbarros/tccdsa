@@ -61,7 +61,7 @@ class Runner():
     def __load_data(cls):
         def get_db_from_file(full_path):
             print_verbose(f"Reading data from: {full_path}")
-            csv_file_metrics = m.FileMetrics(full_path)
+            csv_file_metrics = ch.FileMetrics(full_path)
 
             df = pandas.read_csv(full_path)
             return df, csv_file_metrics

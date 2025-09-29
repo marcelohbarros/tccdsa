@@ -1,5 +1,3 @@
-import csv
-
 import utils
 
 class Metric(utils.HashableElement):
@@ -100,40 +98,3 @@ class MetricTag:
     def __hash__(self):
         return hash((self.tag,))
 
-
-class FileMetrics:
-    def __init__(self, data_path):
-        with open(data_path) as file:
-            reader = csv.reader(file)
-            file_column_tags = next(reader)
-
-        self._metrics = {MetricTag(tag) for tag in file_column_tags}
-        remove = {metric for metric in self._metrics if not metric.is_valid()}
-        self._metrics.difference_update(remove)
-
-        if self.get_name_tag() is None:
-            raise ValueError("A name column is required in the CSV file.")
-        if self.get_bug_tag() is None:
-            raise ValueError("A bug column is required in the CSV file.")
-
-    def filter_tags(self, filter_metrics):
-        if not filter_metrics or filter_metrics.is_empty():
-            return self.get_all_tags()
-        return [metric.tag for metric in self._metrics if metric.metric in filter_metrics.metrics]
-
-    def get_all(self):
-        return [metric.metric for metric in self._metrics]
-
-    def get_tag(self, metric):
-        for m in self._metrics:
-            if m.metric == metric:
-                return m.tag
-
-    def get_all_tags(self):
-        return [metric.tag for metric in self._metrics]
-
-    def get_name_tag(self):
-        return self.get_tag(NAME)
-    
-    def get_bug_tag(self):
-        return self.get_tag(BUG)
