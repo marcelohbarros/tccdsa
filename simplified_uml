@@ -1,0 +1,232 @@
+@startuml
+package "utils.py" as utils <<frame>> {
+    abstract class HashableElement {
+        + HashableElement(name, description)
+    }
+    hide HashableElement attributes
+}
+
+
+package "metrics.py" as metrics <<frame>> {
+    class Metric {
+        + Metric(name, description, tags)
+    }
+    hide Metric attributes
+    Metric -up-|> utils.HashableElement
+    
+    class globals {
+        + NAME : Metric
+        + BUG : Metric
+        + AMC : Metric
+        ...
+        + WMC : Metric
+    }
+
+    hide globals circle
+    hide globals methods
+}
+
+package "config.py" as config <<frame>> {
+    class globals {
+        + data_path
+        + presets : preset.PreSet
+        + repetitions
+        + verbose
+        + parse_args()
+    }
+    hide globals circle
+}
+
+
+package "preset.py" as preset <<frame>> {
+    class PreSet {
+        {static} all_presets
+        + id
+        + PreSet(name, description, metrics, train_ratio,\n\
+balance_ratio, use_boolean_model, pca_features,
+        estimators, criterion, max_features, bootstrap)
+    }
+    PreSet -up-|> utils.HashableElement
+    PreSet "1" .up.* "*" metrics.Metric
+}
+
+package "csvhandler.py" as csvhandler <<frame>> {
+    abstract class CsvWriter {
+        {abstract} _row_data_class
+        - _field_names
+        - _writer : csv.DictWriter
+        + write(data_list)
+    }
+    CsvWriter "1" .down.* "1" CsvRowData
+    
+    class TestCsvWriter {
+        {static} _row_data_class = TestCsvRowData
+    }
+    TestCsvWriter --|> CsvWriter
+    hide TestCsvWriter methods
+    
+    class ModelCsvWriter {
+        {static} _row_data_class = ModelCsvRowData
+    }
+    ModelCsvWriter --|> CsvWriter
+    hide ModelCsvWriter methods
+    
+    abstract class CsvReader {
+        {abstract} _row_data_class
+        + df
+    }
+    CsvReader "1" .up.* "1" CsvRowData
+
+    hide CsvReader methods
+    
+    class TestCsvReader {
+        {static} _row_data_class = TestCsvRowData
+    }
+    TestCsvReader -up-|> CsvReader
+    hide TestCsvReader methods
+    
+    class ModelCsvReader {
+        {static} _row_data_class = ModelCsvRowData
+    }
+    ModelCsvReader -up-|> CsvReader
+    hide ModelCsvReader methods
+    
+    abstract class CsvRowData {
+        {abstract} _file
+        {abstract} _input_format
+        {abstract} _conversion
+        {static} get_csv_row_names()
+        + to_dict()
+    }
+    hide CsvRowData methods
+    
+    class FileMetrics {
+        - _metrics
+        + FileMetrics(data_path)
+    }
+    
+    FileMetrics .up.* metrics.Metric
+    TestCsvWriter -[hidden]down-> FileMetrics
+
+}
+
+
+package "buildmodels.py" as buildmodels <<frame>> #FFFFED {
+
+    class Runner {
+        {static} data()
+        {static} iter_tests()
+        {static} __load_data()
+    }
+    hide Runner attributes
+    class Test {
+        - _id
+        - _dataset
+        - _df
+        - _tags
+        - _preset
+        - _models
+        {static} count()
+        + Test(id, dataset, df, tags, name_tag, bug_tag, preset)
+        + __iter__()
+        + save_results()
+    }
+    class Model {
+        - _id
+        + Model(rep_id, df, tags, name_tag, bug_tag, preset)
+        + run()
+        + save_results()
+        + clean()
+        + data
+        - __normalize_data()
+        - __extract_features()
+        - __split_data()
+        - __balance_data(train_df)
+        - __train_model(train_df)
+        - __evaluate_model(clf, input_columns, validation_df)
+    }
+    
+    Runner "1" .left.> "*" Test : yields
+    Test "1" .left.> "*" Model : yields/contains
+    Test "1" .up.* "1" preset.PreSet
+    Model "1" .up.* "1" preset.PreSet
+    Runner ..* csvhandler.FileMetrics
+}
+
+package "analyzeresults.py" as analyzeresults <<frame>> #FFFFED {
+    class globals {
+        +main()
+        +print_report(test_df, model_df)
+    }
+    hide globals circle
+    hide globals attributes
+}
+
+package datasets #ADD8E6 {
+    package tomcat <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package synapse_1_0 <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package synapse_1_1 <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package synapse_1_2 <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package baseline <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    tomcat -[hidden]down-> synapse_1_0
+    synapse_1_0 -[hidden]down-> synapse_1_1
+    synapse_1_1 -[hidden]down-> synapse_1_2
+    synapse_1_2 -[hidden]down-> baseline
+}
+
+buildmodels.Runner -down-> datasets
+
+package logs #ADD8E6 {
+    package models <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package tests <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    package img {
+        class fake_class {}
+        hide fake_class
+    }
+    package analyzeresults_log <<database>> {
+        class fake_class {}
+        hide fake_class
+    }
+    img -[hidden]down-> models
+    models -[hidden]down-> tests
+    tests -[hidden]down-> analyzeresults_log
+    
+}
+
+config "1" .down.> "*" preset.PreSet
+
+buildmodels .up.> config
+buildmodels.Test "*" .down.* "1" csvhandler.TestCsvWriter
+buildmodels.Model "*" .down.* "1" csvhandler.ModelCsvWriter
+buildmodels.Model ..> logs.img
+
+csvhandler.CsvRowData -left-> logs
+analyzeresults -up-> logs.analyzeresults_log
+
+csvhandler -[hidden]right-> datasets
+csvhandler -[hidden]left-> logs
+
+analyzeresults.globals "1" .up.* "1" csvhandler.TestCsvReader
+analyzeresults.globals "1" .up.* "1" csvhandler.ModelCsvReader
+@enduml
